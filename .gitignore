@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — tout ignorer SAUF le modèle committable `.env.example`.
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -45,3 +46,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# local overrides divers (sécurité : ne jamais committer un fichier *.local)
+*.local
+!.env.example
