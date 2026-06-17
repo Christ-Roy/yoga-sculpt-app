@@ -1,0 +1,23 @@
+{
+  // ==========================================================================
+  // Yoga Sculpt — Espace client → Cloudflare Workers (via OpenNext)
+  // PHASE 1 : config présente mais AUCUN déploiement effectué.
+  // Le domaine app.yoga-sculpt.fr sera rattaché plus tard (routes/custom domain).
+  // ==========================================================================
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yoga-sculpt-app",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-06-01",
+  // nodejs_compat requis par OpenNext (polyfills Node sur Workers).
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+  // Les secrets (clés Supabase service role, Stripe, etc.) seront poussés
+  // via `wrangler secret put` au moment du déploiement — JAMAIS commités ici.
+  // Les NEXT_PUBLIC_* peuvent aller dans [vars] ou être injectées au build.
+}
