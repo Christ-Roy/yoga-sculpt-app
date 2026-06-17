@@ -67,7 +67,7 @@ jobs:
       #    qu'on ne peut pas corriger). Dès qu'un fix existe, ça redevient
       #    bloquant.
       - name: Trivy scan (blocking)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -81,7 +81,7 @@ jobs:
       #    bloquante a échoué (visibilité dans l'onglet Security de GitHub).
       - name: Trivy scan (SARIF report)
         if: always()
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
