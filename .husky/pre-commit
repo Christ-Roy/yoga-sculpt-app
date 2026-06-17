@@ -1,0 +1,2 @@
+# Lint + auto-fix les fichiers TS/TSX stagés (rapide : ne touche que le staged).
+npx lint-staged

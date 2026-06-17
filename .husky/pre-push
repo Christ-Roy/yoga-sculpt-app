@@ -1,0 +1,4 @@
+# Avant un push : lint complet (src) + typecheck. Empêche de pousser du code qui
+# ne compile pas. On évite `next build` ici (trop lent pour un hook) — la CI
+# GitHub Actions fait le build complet sur le serveur.
+npm run lint && npm run typecheck

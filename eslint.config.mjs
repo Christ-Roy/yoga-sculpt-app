@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Artefacts de build Cloudflare/OpenNext (bundle Worker généré) — ne pas
+    // linter, sinon eslint parcourt du code généré (faux positifs + OOM).
+    ".open-next/**",
+    ".wrangler/**",
+    "node_modules/**",
   ]),
 ]);
 

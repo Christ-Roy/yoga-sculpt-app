@@ -1,0 +1,130 @@
+name: CI
+
+# Sécurité + qualité sur chaque push et chaque PR vers main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Annule un run précédent encore en cours sur la même ref (économise les minutes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Nécessaire pour pousser le rapport SARIF dans l'onglet Security.
+  security-events: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Lint + typecheck + build Next (build standard, PAS le build OpenNext).
+  # ──────────────────────────────────────────────────────────────────────────
+  lint-build:
+    name: Lint, typecheck & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (Next standard)
+        run: npm run build
+        env:
+          # Le build Next a besoin des variables publiques. Valeurs factices
+          # suffisantes pour un build statique (aucun appel réseau au build).
+          NEXT_PUBLIC_APP_URL: https://app.yoga-sculpt.fr
+          NEXT_PUBLIC_SITE_URL: https://yoga-sculpt.fr
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Trivy : scan filesystem (CVE des dépendances) + secrets + misconfigs.
+  # ──────────────────────────────────────────────────────────────────────────
+  trivy:
+    name: Trivy (vuln + secret + config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1) Scan BLOQUANT : échoue la CI si une CVE CRITICAL/HIGH corrigeable
+      #    (ou un secret commité, ou une misconfig grave) est détectée.
+      #    `ignore-unfixed: true` → on ne bloque PAS sur les CVE sans patch
+      #    disponible en amont (sinon CI rouge en permanence pour des failles
+      #    qu'on ne peut pas corriger). Dès qu'un fix existe, ça redevient
+      #    bloquant.
+      - name: Trivy scan (blocking)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,config
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      # 2) Re-scan NON bloquant pour produire le rapport SARIF, même si l'étape
+      #    bloquante a échoué (visibilité dans l'onglet Security de GitHub).
+      - name: Trivy scan (SARIF report)
+        if: always()
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,config
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 0
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-fs
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # npm audit : complément de Trivy, plus précis sur l'arbre de dépendances npm.
+  # ──────────────────────────────────────────────────────────────────────────
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Seuil = critical. Raison : l'arbre actuel a des CVE HIGH/MODERATE
+      # connues, TOUTES dans des dépendances de BUILD/dev (jamais embarquées
+      # dans le Worker déployé) et sans fix non-cassant disponible :
+      #   - esbuild (HIGH)  : dev-server Windows uniquement — via wrangler.
+      #   - ws (HIGH)       : DoS — via miniflare (émulateur Workers local).
+      #   - postcss (MOD)   : XSS au stringify — via next (build CSS).
+      # `npm audit fix --force` les "corrige" en downgradant next@16→9 et
+      # wrangler (breaking) : inacceptable. On bloque donc sur CRITICAL (il n'y
+      # en a aucune) ; les HIGH/MOD ci-dessus sont suivies mais non bloquantes.
+      # Trivy (ci-dessus, severity HIGH) reste le garde-fou sur le code applicatif.
+      - name: npm audit (critical blocking)
+        run: npm audit --audit-level=critical
