@@ -1,0 +1,86 @@
+name: Deploy production
+
+# ============================================================================
+# Deploy PRODUCTION (Cloudflare Workers via OpenNext).
+#
+# Déclencheur : MANUEL UNIQUEMENT (`workflow_dispatch`, bouton "Run workflow"
+# dans l'onglet Actions, branche main).
+#
+# ⚠️ POURQUOI MANUEL ET PAS `push: main` :
+#    Pendant qu'on développe, des merges arrivent sur `main` régulièrement. Un
+#    auto-deploy prod sur chaque push main = risque de pousser en prod un état
+#    non validé. La prod reste donc un GESTE DÉLIBÉRÉ : on vérifie le staging,
+#    puis on clique "Run workflow" sur main. Le `if: github.ref == ...main` ci-
+#    dessous garantit en plus qu'on ne peut lancer ce workflow QUE depuis main.
+#
+#    Durcissement possible (optionnel, à activer par Robert) : créer un GitHub
+#    Environment nommé `production` (Settings → Environments) avec "Required
+#    reviewers" → un humain doit approuver chaque run prod. Le job référence déjà
+#    `environment: production` ci-dessous : il suffit d'ajouter les reviewers.
+#
+# Cible : Worker `yoga-sculpt-app` (env production de wrangler.jsonc),
+#         Supabase PROD (ref esearpxflfgreejjxlfg), cron ACTIF.
+#
+# ---------------------------------------------------------------------------
+# GitHub Secrets REQUIS (Settings → Secrets and variables → Actions) :
+#
+#   CLOUDFLARE_EMAIL             email du compte Cloudflare
+#   CLOUDFLARE_API_KEY           Global API Key Cloudflare
+#   CLOUDFLARE_ACCOUNT_ID        id du compte Cloudflare
+#
+#   # Supabase PROD — valeurs publiques (anon/url) injectées AU BUILD.
+#   PROD_NEXT_PUBLIC_SUPABASE_URL       https://esearpxflfgreejjxlfg.supabase.co
+#   PROD_NEXT_PUBLIC_SUPABASE_ANON_KEY  clé anon du projet prod
+#   PROD_NEXT_PUBLIC_APP_URL            https://app.yoga-sculpt.fr
+#
+# (Les SECRETS serveur sont poussés une fois via
+#  `wrangler secret put <NOM> --env production`. Voir DEPLOY.md.)
+# ============================================================================
+
+on:
+  workflow_dispatch:
+
+# Un seul déploiement prod à la fois.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & deploy (production)
+    runs-on: ubuntu-latest
+    # Ne s'exécute QUE depuis main (filet : le bouton Run workflow propose la ref).
+    if: github.ref == 'refs/heads/main'
+    # GitHub Environment : ajouter des "Required reviewers" ici pour une
+    # approbation humaine avant tout déploiement prod (cf. en-tête).
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (Next + OpenNext)
+        run: |
+          npm run build
+          npx opennextjs-cloudflare build
+        env:
+          NEXT_PUBLIC_SITE_URL: https://yoga-sculpt.fr
+          NEXT_PUBLIC_APP_URL: ${{ secrets.PROD_NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Deploy to Cloudflare (production)
+        run: npx wrangler deploy --env production
+        env:
+          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

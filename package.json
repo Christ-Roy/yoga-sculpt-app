@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "ci:checks": "scripts/ci/check-test-mapping.sh && scripts/ci/check-no-stripe-live-key.sh && scripts/ci/check-migration-safety.sh && scripts/ci/check-env-sync.sh",
+    "deploy:staging": "opennextjs-cloudflare build && wrangler deploy --env staging",
+    "deploy:prod": "opennextjs-cloudflare build && wrangler deploy --env production",
     "prepare": "husky"
   },
   "lint-staged": {

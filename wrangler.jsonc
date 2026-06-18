@@ -1,8 +1,35 @@
 {
   // ==========================================================================
   // Yoga Sculpt — Espace client → Cloudflare Workers (via OpenNext)
-  // PHASE 1 : config présente mais AUCUN déploiement effectué.
-  // Le domaine app.yoga-sculpt.fr sera rattaché plus tard (routes/custom domain).
+  //
+  // DEUX ENVIRONNEMENTS (clé `env` de wrangler) :
+  //   - production : Worker `yoga-sculpt-app`         (Supabase prod, cron actif)
+  //   - staging    : Worker `yoga-sculpt-app-staging` (Supabase staging, PAS de cron)
+  //
+  // Flux de déploiement (cf. DEPLOY.md) :
+  //   push sur `staging` → CI auto-deploy en staging  (--env staging)
+  //   merge dans `main`  → deploy prod MANUEL          (--env production, workflow_dispatch)
+  //
+  // ⚠️ La config RACINE (top-level) ci-dessous = celle de PRODUCTION par défaut.
+  //    En wrangler, dès qu'on utilise `env.*`, on cible un env nommé avec
+  //    `--env <nom>`. On a donc :
+  //      - `env.production` qui RÉPÈTE explicitement la prod (pour `--env production`)
+  //      - `env.staging`    pour le staging
+  //    La racine reste valide pour un `wrangler dev`/`deploy` sans `--env`.
+  //
+  // ⚠️ SECRETS : RIEN de sensible ici. `vars` ne contient QUE des valeurs
+  //    publiques (URL Supabase, clé ANON protégée par RLS, URLs publiques).
+  //    Les secrets serveur sont poussés par environnement via :
+  //      wrangler secret put <NOM> --env staging
+  //      wrangler secret put <NOM> --env production
+  //    Liste des secrets à pousser (par env) — voir DEPLOY.md :
+  //      SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET,
+  //      ADMIN_EMAILS, CRON_SECRET (prod uniquement, cron actif),
+  //      GOOGLE_CALENDAR_SA_KEY, GOOGLE_CALENDAR_ID,
+  //      BREVO_API_KEY,
+  //      STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+  //      STRIPE_PRICE_COLLECTIF, STRIPE_PRICE_PARTICULIER, STRIPE_PRICE_CARTE10,
+  //      CALCOM_API_KEY, CALCOM_WEBHOOK_SECRET.
   // ==========================================================================
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yoga-sculpt-app",
@@ -18,11 +45,14 @@
     "enabled": true
   },
   // ---------------------------------------------------------------------------
-  // Cron Triggers — rappels mail automatiques J-1 / H-2 (cf. src/lib/reminders.ts).
+  // Cron Triggers (PROD) — rappels mail automatiques J-1 / H-2 (cf. src/lib/reminders.ts).
   // Tick toutes les 15 min : la fenêtre de scan (±15 min autour de T-24h / T-2h)
   // est calée sur cette cadence pour qu'aucune résa ne soit ratée ni doublée.
   // Le tick déclenche la route protégée GET /api/cron (secret CRON_SECRET) —
   // voir l'en-tête de src/app/api/cron/route.ts pour le branchement déclencheur.
+  // ⚠️ Ce cron racine s'applique à la PROD. En STAGING il est VOLONTAIREMENT
+  //    désactivé (cf. env.staging) pour ne JAMAIS envoyer de vrais mails depuis
+  //    l'environnement de test.
   // ---------------------------------------------------------------------------
   "triggers": {
     "crons": ["*/15 * * * *"]
@@ -33,9 +63,6 @@
   // route handlers / edge middleware) via process.env → ces valeurs doivent
   // exister au runtime, pas seulement au build. La clé ANON est publique par
   // design Supabase (protégée par RLS) ; l'URL aussi. Aucun secret ici.
-  // Les secrets (SUPABASE_SERVICE_ROLE_KEY, CALCOM_API_KEY,
-  // CALCOM_WEBHOOK_SECRET, Stripe…) sont poussés via `wrangler secret put` —
-  // JAMAIS commités.
   // ---------------------------------------------------------------------------
   "vars": {
     "NEXT_PUBLIC_SUPABASE_URL": "https://esearpxflfgreejjxlfg.supabase.co",
@@ -44,5 +71,66 @@
     "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
     "CALCOM_USERNAME": "alice-cbmnu0",
     "CALCOM_EVENT_SLUG": "yoga-sculpt"
+  },
+  // ===========================================================================
+  // ENVIRONNEMENTS NOMMÉS
+  // ===========================================================================
+  "env": {
+    // -------------------------------------------------------------------------
+    // PRODUCTION — cible de `wrangler deploy --env production`.
+    // Répète la config prod (un env nommé n'hérite PAS automatiquement de la
+    // racine pour name/triggers/vars). Worker `yoga-sculpt-app`, cron ACTIF.
+    // -------------------------------------------------------------------------
+    "production": {
+      "name": "yoga-sculpt-app",
+      "observability": {
+        "enabled": true
+      },
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
+      "vars": {
+        "NEXT_PUBLIC_SUPABASE_URL": "https://esearpxflfgreejjxlfg.supabase.co",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzZWFycHhmbGZncmVlamp4bGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjg5MjQsImV4cCI6MjA5NzMwNDkyNH0.98vPb7DBZ_8peL-66IlfBEa70FxUm58lm0-nKcP8Bw0",
+        "NEXT_PUBLIC_APP_URL": "https://app.yoga-sculpt.fr",
+        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
+        "CALCOM_USERNAME": "alice-cbmnu0",
+        "CALCOM_EVENT_SLUG": "yoga-sculpt"
+      }
+    },
+    // -------------------------------------------------------------------------
+    // STAGING — cible de `wrangler deploy --env staging`.
+    // Worker `yoga-sculpt-app-staging`, Supabase STAGING (ref htgbtckgkulwuyzfsvjq),
+    // PAS de cron (aucun envoi de mail réel depuis staging).
+    //
+    // ⚠️ NEXT_PUBLIC_APP_URL : l'URL workers.dev par défaut du Worker staging est
+    //    https://yoga-sculpt-app-staging.<sous-domaine-de-compte>.workers.dev
+    //    Le <sous-domaine-de-compte> dépend du compte Cloudflare (ex. xxxxx.workers.dev).
+    //    Robert doit remplacer la valeur ci-dessous par l'URL réelle affichée au
+    //    1er déploiement (ou par un sous-domaine staging.app.yoga-sculpt.fr s'il en
+    //    branche un). Tant que ce n'est pas calé, les liens absolus / callbacks
+    //    OAuth de staging pointeront sur cette valeur.
+    //
+    // ⚠️ NEXT_PUBLIC_SUPABASE_ANON_KEY (staging) : placeholder ci-dessous. La
+    //    vraie clé ANON du projet staging est non sensible (publique, RLS) mais
+    //    elle est injectée au BUILD via le GitHub Secret
+    //    STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY (cf. deploy-staging.yml).
+    //    La valeur runtime ici sert de filet ; le build embarque la bonne clé.
+    // -------------------------------------------------------------------------
+    "staging": {
+      "name": "yoga-sculpt-app-staging",
+      "observability": {
+        "enabled": true
+      },
+      // PAS de `triggers.crons` → aucun cron en staging (anti-mails-fantômes).
+      "vars": {
+        "NEXT_PUBLIC_SUPABASE_URL": "https://htgbtckgkulwuyzfsvjq.supabase.co",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY": "STAGING_ANON_KEY_PLACEHOLDER",
+        "NEXT_PUBLIC_APP_URL": "https://yoga-sculpt-app-staging.workers.dev",
+        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
+        "CALCOM_USERNAME": "alice-cbmnu0",
+        "CALCOM_EVENT_SLUG": "yoga-sculpt"
+      }
+    }
   }
 }
