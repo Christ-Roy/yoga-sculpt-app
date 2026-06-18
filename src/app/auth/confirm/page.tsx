@@ -36,7 +36,7 @@ export default async function ConfirmPage({
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-bg px-5 py-10">
-      <Logo className="text-2xl" />
+      <Logo title="Yoga Sculpt — confirmation" />
       <div className="mt-8 w-full max-w-sm rounded-[4px] border border-border bg-surface/60 p-8 text-center">
         <ConfirmClient
           tokenHash={tokenHash}

@@ -50,13 +50,17 @@ export function AdminSidebar({ userLabel }: { userLabel: string }) {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <Logo className="text-lg group-data-[collapsible=icon]:hidden" />
-          <span
-            aria-hidden
-            className="wordmark hidden text-lg text-accent group-data-[collapsible=icon]:inline"
-          >
-            YS
-          </span>
+          {/* Logo complet (médaillon + wordmark) quand la sidebar est dépliée. */}
+          <Logo
+            title="Yoga Sculpt — admin"
+            className="group-data-[collapsible=icon]:hidden"
+          />
+          {/* Médaillon seul quand la sidebar est repliée (espace étroit). */}
+          <Logo
+            title="Yoga Sculpt — admin réduit"
+            showText={false}
+            className="hidden group-data-[collapsible=icon]:inline-flex"
+          />
           <span className="rounded-[var(--radius)] border border-accent/50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest text-accent group-data-[collapsible=icon]:hidden">
             Admin
           </span>

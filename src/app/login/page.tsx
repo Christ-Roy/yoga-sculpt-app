@@ -61,7 +61,7 @@ export default async function LoginPage({
       <div className="w-full max-w-sm animate-fade-in-up">
         {/* Logo */}
         <div className="mb-10 flex flex-col items-center text-center">
-          <Logo className="text-2xl" />
+          <Logo title="Yoga Sculpt — connexion" />
           <p className="mt-4 text-sm text-text-secondary">
             Votre espace personnel
           </p>

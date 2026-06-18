@@ -72,8 +72,8 @@ export function OnboardingFlow({
 
     return (
       <div className="w-full max-w-2xl animate-fade-in-up">
-        <div className="mb-8 text-center">
-          <Logo className="text-xl" />
+        <div className="mb-8 flex justify-center text-center">
+          <Logo title="Yoga Sculpt — bienvenue" />
         </div>
         <div className="rounded-[4px] border border-border bg-surface/60 p-6 sm:p-8">
           <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
@@ -130,7 +130,7 @@ export function OnboardingFlow({
       {/* En-tête : logo + progression */}
       <div className="mb-8">
         <div className="mb-5 flex items-center justify-between">
-          <Logo className="text-lg" />
+          <Logo title="Yoga Sculpt — onboarding" />
           <span className="text-xs uppercase tracking-widest text-text-secondary">
             Étape {stepIndex + 1} / {total}
           </span>

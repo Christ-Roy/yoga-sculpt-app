@@ -32,7 +32,7 @@ const LIENS = [
 /**
  * Sidebar de l'espace client (charte NOIR & OR).
  *
- * - Header : wordmark "YOGA SCULPT".
+ * - Header : logo Yoga Sculpt (médaillon + wordmark ; médaillon seul replié).
  * - Contenu : liens vers les pages de l'espace, item actif souligné en OR.
  * - Footer : nom de l'utilisateur + bouton déconnexion.
  *
@@ -54,14 +54,17 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
           aria-label="Mon espace"
           className="flex items-center px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
-          <Logo className="text-lg group-data-[collapsible=icon]:hidden" />
-          {/* Monogramme compact quand la sidebar est repliée. */}
-          <span
-            aria-hidden
-            className="wordmark hidden text-lg text-accent group-data-[collapsible=icon]:inline"
-          >
-            YS
-          </span>
+          {/* Logo complet (médaillon + wordmark) quand la sidebar est dépliée. */}
+          <Logo
+            title="Yoga Sculpt — espace"
+            className="group-data-[collapsible=icon]:hidden"
+          />
+          {/* Médaillon seul quand la sidebar est repliée (espace étroit). */}
+          <Logo
+            title="Yoga Sculpt — espace réduit"
+            showText={false}
+            className="hidden group-data-[collapsible=icon]:inline-flex"
+          />
         </Link>
       </SidebarHeader>
 
