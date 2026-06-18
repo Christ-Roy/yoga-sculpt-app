@@ -183,6 +183,104 @@ export function retirerAttendee(
 }
 
 // ============================================================================
+// Formatage FR (PUR) — partagé UI Lot E / dashboard Lot F
+// ============================================================================
+
+/**
+ * Fuseau d'affichage des créneaux. Alice et ses clientes sont à Lyon ; on rend
+ * donc toujours les dates en heure de Paris quelle que soit la machine (les
+ * Workers tournent en UTC). Toutes les fonctions ci-dessous passent ce TZ à
+ * `Intl.DateTimeFormat` pour un rendu déterministe et correct (gère l'heure
+ * d'été/hiver automatiquement).
+ */
+export const TZ_AFFICHAGE = "Europe/Paris";
+
+/**
+ * Clé de regroupement par jour, stable et triable (format `YYYY-MM-DD` calculé
+ * dans le fuseau de Paris). Sert à grouper les créneaux par date côté UI sans
+ * dépendre du fuseau du serveur.
+ */
+export function cleJour(iso: string, timeZone: string = TZ_AFFICHAGE): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  // `en-CA` rend nativement "YYYY-MM-DD" ; on force le fuseau Paris.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/**
+ * Libellé long d'une date en français, ex. "Mardi 23 juin".
+ * (Pas d'année : l'horizon d'affichage est court, ~60 jours.)
+ */
+export function formaterDateLongueFr(
+  iso: string,
+  timeZone: string = TZ_AFFICHAGE,
+): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const brut = new Intl.DateTimeFormat("fr-FR", {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(d);
+  // Majuscule initiale ("mardi 23 juin" → "Mardi 23 juin").
+  return brut.charAt(0).toUpperCase() + brut.slice(1);
+}
+
+/** Heure d'une borne au format FR `19h00`. */
+export function formaterHeureFr(
+  iso: string,
+  timeZone: string = TZ_AFFICHAGE,
+): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  // `fr-FR` rend "19:00" ; on remplace le ":" par "h" (convention FR créneaux).
+  return new Intl.DateTimeFormat("fr-FR", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(d)
+    .replace(":", "h");
+}
+
+/** Plage horaire d'un créneau, ex. "19h00 — 20h00". */
+export function formaterPlageFr(
+  startIso: string,
+  endIso: string,
+  timeZone: string = TZ_AFFICHAGE,
+): string {
+  return `${formaterHeureFr(startIso, timeZone)} — ${formaterHeureFr(endIso, timeZone)}`;
+}
+
+/** Libellé FR du type de cours (affichage badge / titre). */
+export function libelleType(type: TicketType): string {
+  return type === "particulier" ? "Cours particulier" : "Cours collectif";
+}
+
+/**
+ * Vrai si le créneau démarre dans moins de `heures` heures par rapport à
+ * `maintenant`. Sert au garde-fou UI d'annulation (règle des 24h).
+ */
+export function dansMoinsDe(
+  startIso: string,
+  heures: number,
+  maintenant: Date = new Date(),
+): boolean {
+  const start = new Date(startIso).getTime();
+  if (Number.isNaN(start)) return false;
+  return start - maintenant.getTime() < heures * 60 * 60 * 1000;
+}
+
+/** Délai minimal (en heures) avant le créneau pour pouvoir annuler. */
+export const DELAI_ANNULATION_HEURES = 24;
+
+// ============================================================================
 // Fenêtre de listing des créneaux
 // ============================================================================
 

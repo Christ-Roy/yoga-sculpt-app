@@ -3,13 +3,27 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
-import { calBookingUrlWithPrefill, TICKET_PRICE_EUR } from "@/lib/booking";
+import { ReserverClient } from "@/components/ReserverClient";
+import type { Ticket, TicketType } from "@/lib/db-types";
 
 export const metadata: Metadata = {
-  title: "Réserver un ticket — Yoga Sculpt",
+  title: "Réserver une séance — Yoga Sculpt",
 };
 
-export default async function ReserverPage() {
+/**
+ * Page de réservation — calendrier MAISON (remplace l'embed Cal.com).
+ *
+ * Server Component : auth + lecture du solde de tickets (RLS user-scopée) ;
+ * délègue toute l'interactivité (liste des créneaux, réserver, achat) à
+ * `ReserverClient`. Les créneaux eux-mêmes sont chargés côté client depuis
+ * `GET /api/creneaux` (données temps réel du Google Agenda d'Alice).
+ */
+export default async function ReserverPage({
+  searchParams,
+}: {
+  // Next 16 : searchParams est une Promise.
+  searchParams: Promise<{ status?: string }>;
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -21,62 +35,62 @@ export default async function ReserverPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, email, phone")
+    .select("full_name, email")
     .eq("id", user.id)
     .maybeSingle();
 
   const userLabel = profile?.full_name || profile?.email || user.email || "";
 
-  // Lien Cal pré-rempli depuis le profil (name / email / téléphone).
-  const bookingUrl = calBookingUrlWithPrefill({
-    name: profile?.full_name ?? null,
-    email: profile?.email ?? user.email ?? null,
-    phone: profile?.phone ?? null,
-  });
+  // Solde de tickets (RLS : le user ne voit que les siens). On agrège les
+  // quantités restantes valides par type.
+  const nowIso = new Date().toISOString();
+  const { data: tickets } = await supabase
+    .from("tickets")
+    .select("type, quantite_restante, expires_at")
+    .gt("quantite_restante", 0)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
+
+  const solde = { collectif: 0, particulier: 0 };
+  for (const t of (tickets ?? []) as Pick<
+    Ticket,
+    "type" | "quantite_restante"
+  >[]) {
+    const type = t.type as TicketType;
+    if (type === "collectif" || type === "particulier") {
+      solde[type] += t.quantite_restante;
+    }
+  }
+
+  const { status } = await searchParams;
+  const statusParam =
+    status === "success" || status === "cancel" ? status : null;
 
   return (
     <>
       <AppHeader userLabel={userLabel} />
 
-      <main className="mx-auto max-w-2xl px-5 py-10">
-        <Link
-          href="/espace"
-          className="text-sm text-text-secondary transition-colors hover:text-text"
-        >
-          ← Retour à mon espace
-        </Link>
-
-        <div className="mt-6 rounded-[4px] border border-border bg-surface/60 p-7 sm:p-9 animate-fade-in-up">
-          <span className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs uppercase tracking-widest text-accent">
-            Bientôt disponible
-          </span>
-
-          <h1 className="mt-5 font-display text-3xl text-text">
-            Ticket séance — {TICKET_PRICE_EUR} €
-          </h1>
-          <p className="mt-3 text-sm leading-relaxed text-text-secondary">
-            Le paiement en ligne des tickets de séance arrive très bientôt.
-            En attendant, vous pouvez réserver directement une séance avec
-            Alice via le calendrier.
-          </p>
-
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-            <a
-              href={bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-3 text-sm font-medium tracking-wide text-[#0e0e0e] transition-colors hover:bg-accent-dark"
-            >
-              Réserver une séance maintenant
-            </a>
+      <main className="mx-auto max-w-3xl px-5 py-8 sm:py-10">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
+          <div>
             <Link
               href="/espace"
-              className="inline-flex items-center justify-center rounded-[4px] border border-border bg-surface px-5 py-3 text-sm font-medium tracking-wide text-text transition-colors hover:border-accent/60 hover:bg-surface-2"
+              className="text-sm text-text-secondary transition-colors hover:text-text"
             >
-              Plus tard
+              ← Mon espace
             </Link>
+            <h1 className="mt-2 font-display text-3xl text-text">
+              Réserver une séance
+            </h1>
           </div>
+          <Link
+            href="/espace/reservations"
+            className="text-sm text-accent transition-colors hover:text-accent-dark"
+          >
+            Mes réservations →
+          </Link>
         </div>
+
+        <ReserverClient soldeInitial={solde} statusParam={statusParam} />
       </main>
     </>
   );

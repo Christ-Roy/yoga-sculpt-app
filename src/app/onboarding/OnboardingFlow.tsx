@@ -4,8 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/Button";
-import { BuyTicketButton } from "@/components/BuyTicketButton";
-import { CalEmbed } from "@/components/CalEmbed";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
 import type { BookingPrefill } from "@/lib/booking";
 import { saveOnboarding } from "./actions";
@@ -88,24 +86,24 @@ export function OnboardingFlow({
             C&apos;est parti{firstName ? `, ${firstName}` : ""} !
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-text-secondary">
-            Votre profil est prêt. Choisissez ci-dessous un créneau pour votre
-            première séance avec Alice — vos coordonnées sont déjà pré-remplies.
+            Votre profil est prêt. Découvrez les créneaux proposés par Alice et
+            réservez votre première séance depuis votre espace.
           </p>
 
           {!hasPhone && (
             <p className="mt-4 rounded-[4px] border border-border bg-surface px-4 py-3 text-xs leading-relaxed text-text-secondary">
-              Astuce : renseignez votre téléphone dans votre profil pour le
-              pré-remplir automatiquement lors de la réservation.
+              Astuce : renseignez votre téléphone dans votre profil pour
+              faciliter la prise de contact avec Alice.
             </p>
           )}
 
-          {/* Widget Cal.com embarqué, pré-rempli depuis le profil. */}
-          <div className="mt-6">
-            <CalEmbed prefill={prefill} />
-          </div>
-
           <div className="mt-7 flex flex-col gap-3">
-            <BuyTicketButton className="w-full" />
+            <Button
+              onClick={() => router.push("/espace/reserver")}
+              className="w-full"
+            >
+              Voir les créneaux
+            </Button>
 
             <Button
               variant="ghost"
