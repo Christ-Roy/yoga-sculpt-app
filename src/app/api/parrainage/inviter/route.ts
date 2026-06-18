@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getOrCreateCode, normaliserEmail } from "@/lib/referral";
 import { isDisposableEmail } from "@/lib/anti-abuse";
+import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
 
 /**
  * POST /api/parrainage/inviter — le membre connecté invite un filleul par e-mail.
@@ -174,17 +175,41 @@ async function envoyerInvitation(params: {
   }
 
   const lien = `${appUrl}/login?ref=${encodeURIComponent(params.code)}`;
+  // Texte brut (pour la version texte + interpolation HTML échappée).
   const deLaPart = params.parrainNom ? ` de la part de ${params.parrainNom}` : "";
+  // Variante HTML : le nom du parrain (donnée utilisateur) doit être échappé.
+  const deLaPartHtml = params.parrainNom
+    ? ` de la part de <strong>${escapeHtml(params.parrainNom)}</strong>`
+    : "";
 
-  const subject = `Vous êtes invité·e à découvrir Yoga Sculpt`;
-  const htmlContent = `
-    <p>Bonjour,</p>
-    <p>Vous avez reçu une invitation${deLaPart} à rejoindre <strong>Yoga Sculpt</strong>,
-    cours de yoga et pilates à Lyon.</p>
-    <p><a href="${lien}">Créer votre compte</a></p>
-    <p>À très vite sur le tapis !</p>
+  const subject = `Un ami vous offre une séance de Yoga Sculpt 🎁`;
+
+  const corpsHtml = `
+    <p style="margin:0 0 12px;">Bonjour,</p>
+    <p style="margin:0 0 12px;">Vous avez reçu une invitation${deLaPartHtml} à découvrir
+    <strong>Yoga Sculpt</strong>, cours de yoga et pilates à Lyon.</p>
+    <p style="margin:0;">Créez votre compte pour en profiter — on vous attend sur le tapis !</p>
   `;
-  const textContent = `Bonjour,\n\nVous êtes invité·e${deLaPart} à rejoindre Yoga Sculpt (yoga & pilates à Lyon).\nCréez votre compte : ${lien}\n\nÀ très vite !`;
+  const { html: htmlContent } = renderEmail({
+    preheader: "Une invitation à découvrir Yoga Sculpt vous attend.",
+    titre: "Un ami vous offre une séance 🎁",
+    corpsHtml,
+    cta: { label: "Découvrir Yoga Sculpt", url: lien },
+    footerNote:
+      "Vous recevez cet email car un membre vous a invité·e à rejoindre Yoga Sculpt.",
+  });
+  const textContent = textFromBlocks([
+    "Bonjour,",
+    "",
+    `Vous êtes invité·e${deLaPart} à découvrir Yoga Sculpt (yoga & pilates à Lyon).`,
+    "",
+    `Créer votre compte : ${lien}`,
+    "",
+    "À très vite sur le tapis !",
+    "",
+    "—",
+    "Yoga Sculpt — Lyon",
+  ]);
 
   const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
