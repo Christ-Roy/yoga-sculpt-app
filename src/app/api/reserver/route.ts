@@ -5,7 +5,6 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getEvent, patchEvent } from "@/lib/google-calendar";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
-  ajouterAttendee,
   bornEventToIso,
   deduireTypeDepuisEvent,
 } from "@/lib/reservation";
@@ -228,49 +227,42 @@ export async function POST(request: Request) {
     );
   }
 
-  // ── 5) Inscrit le user comme attendee de l'event Google (PATCH). ────────────
-  // L'email du user sert d'invitation Google Calendar (Alice voit l'inscrit).
+  // ── 5) Reflète l'inscription dans l'event Google (BEST-EFFORT, jamais bloquant).
+  // ⚠️ On NE peut PAS ajouter le client comme `attendee` : un service account
+  // sans Domain-Wide Delegation se voit refuser l'invitation d'attendees
+  // (403 forbiddenForServiceAccounts). C'est une limite Google connue.
+  // À la place, on patche la DESCRIPTION de l'event (autorisé pour le SA sur
+  // SON calendrier) en y listant les inscrits, pour qu'Alice voie qui vient.
+  //
+  // La SOURCE DE VÉRITÉ de l'inscription est la table `bookings` (déjà écrite,
+  // étape 3) + le dashboard admin. Le reflet dans l'agenda est cosmétique :
+  // s'il échoue, la réservation RESTE valide (200) — on ne rollback PLUS,
+  // sinon on punirait le client pour une limite technique de notre côté.
   try {
-    const attendees = ajouterAttendee(event.attendees, {
-      email: user.email ?? "",
-      displayName:
-        (user.user_metadata?.full_name as string | undefined) ??
-        (user.user_metadata?.name as string | undefined) ??
-        undefined,
-      responseStatus: "accepted",
-    });
-    // On ne PATCH que si on a un email exploitable (sinon la liste est inchangée
-    // et l'appel serait inutile / potentiellement rejeté par Google).
-    if (user.email) {
-      await patchEvent(creneauId, { attendees });
-    }
-  } catch (err) {
-    // Échec Google APRÈS décrément : rollback complet pour ne pas facturer une
-    // séance sans inscription effective. On recrédite le ticket et on supprime
-    // le booking. Ces deux écritures sont best-effort (on log si elles ratent).
-    console.error("[reserver] PATCH attendee Google échoué — rollback :", err);
+    const inscritLabel =
+      (user.user_metadata?.full_name as string | undefined) ??
+      (user.user_metadata?.name as string | undefined) ??
+      user.email ??
+      "Client";
 
-    const { error: recreditErr } = await service
-      .from("tickets")
-      .update({ quantite_restante: ticket.quantite_restante })
-      .eq("id", ticket.id);
-    if (recreditErr) {
-      console.error(
-        "[reserver] Rollback recrédit ticket échoué :",
-        recreditErr.message,
-      );
-    }
-    const { error: delErr } = await service
+    // Compte des inscrits confirmés sur ce créneau (pour un récap fiable).
+    const { count } = await service
       .from("bookings")
-      .delete()
-      .eq("id", booking.id);
-    if (delErr) {
-      console.error("[reserver] Rollback delete booking échoué :", delErr.message);
-    }
+      .select("id", { count: "exact", head: true })
+      .eq("google_calendar_creneau_id", creneauId)
+      .eq("status", "confirmed");
 
-    return NextResponse.json(
-      { error: "La réservation a échoué côté agenda. Réessayez." },
-      { status: 502 },
+    const baseDesc = (event.description ?? "").split("\n— Inscrits :")[0];
+    const nouvelleDesc =
+      `${baseDesc}\n— Inscrits : ${count ?? "?"} ` +
+      `(dernier : ${inscritLabel}). Géré via l'espace client Yoga Sculpt.`;
+
+    await patchEvent(creneauId, { description: nouvelleDesc });
+  } catch (err) {
+    // Best-effort : un échec ici n'invalide PAS la réservation (elle est en base).
+    console.error(
+      "[reserver] Reflet agenda (description) échoué — réservation conservée :",
+      err,
     );
   }
 
