@@ -1,0 +1,84 @@
+name: Deploy staging
+
+# ============================================================================
+# Auto-deploy STAGING (Cloudflare Workers via OpenNext).
+#
+# Déclencheur : tout push sur la branche `staging`.
+#   git checkout -b staging   (1ère fois)  →  git push origin staging
+#   Ensuite : chaque push sur `staging` redéploie le Worker yoga-sculpt-app-staging.
+#
+# Cible : Worker `yoga-sculpt-app-staging` (env staging de wrangler.jsonc),
+#         Supabase STAGING (ref htgbtckgkulwuyzfsvjq), AUCUN cron.
+#
+# ---------------------------------------------------------------------------
+# GitHub Secrets REQUIS (Settings → Secrets and variables → Actions) :
+#
+#   # Cloudflare — le CF_API_TOKEN n'a PAS les droits Workers, donc on utilise
+#   # la Global API Key (email + clé globale + account id). Wrangler lit ces
+#   # variables d'environnement pour s'authentifier en Global Key.
+#   CLOUDFLARE_EMAIL              email du compte Cloudflare
+#   CLOUDFLARE_API_KEY            Global API Key Cloudflare
+#   CLOUDFLARE_ACCOUNT_ID         id du compte Cloudflare
+#
+#   # Supabase STAGING — valeurs publiques (anon/url) injectées AU BUILD car
+#   # Next inline les NEXT_PUBLIC_* dans le bundle au moment du `next build`.
+#   STAGING_NEXT_PUBLIC_SUPABASE_URL        https://htgbtckgkulwuyzfsvjq.supabase.co
+#   STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY   clé anon du projet staging
+#   STAGING_NEXT_PUBLIC_APP_URL             URL du worker staging (workers.dev ou sous-domaine)
+#
+# (Les SECRETS serveur — service role, stripe, brevo, google calendar… — ne
+#  passent PAS par la CI : ils sont poussés une fois via
+#  `wrangler secret put <NOM> --env staging`. Voir DEPLOY.md.)
+# ============================================================================
+
+on:
+  push:
+    branches: [staging]
+  # Permet aussi un re-déploiement manuel depuis l'onglet Actions si besoin.
+  workflow_dispatch:
+
+# Un seul déploiement staging à la fois (évite les courses).
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & deploy (staging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # 1) Build Next + 2) Build OpenNext (génère .open-next/worker.js + assets).
+      #    Les NEXT_PUBLIC_* STAGING sont injectées ici (inlinées dans le bundle).
+      - name: Build (Next + OpenNext)
+        run: |
+          npm run build
+          npx opennextjs-cloudflare build
+        env:
+          NEXT_PUBLIC_SITE_URL: https://yoga-sculpt.fr
+          NEXT_PUBLIC_APP_URL: ${{ secrets.STAGING_NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      # 3) Déploiement Worker sur l'env staging.
+      #    Wrangler s'auth en Global API Key via CLOUDFLARE_EMAIL + CLOUDFLARE_API_KEY.
+      #    On NE définit PAS CLOUDFLARE_API_TOKEN (il n'a pas les droits Workers et
+      #    sa présence ferait prendre le pas sur la Global Key).
+      - name: Deploy to Cloudflare (staging)
+        run: npx wrangler deploy --env staging
+        env:
+          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
