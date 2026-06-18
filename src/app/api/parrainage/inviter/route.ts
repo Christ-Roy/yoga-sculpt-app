@@ -146,6 +146,12 @@ export async function POST(request: Request) {
     },
   );
 
+  // TODO(merge): logEvent referral_invited — dépend de la migration user_events
+  // (agent tracking). À émettre ici (invitation enregistrée), best-effort :
+  //   import { logEvent } from "@/lib/events";
+  //   void logEvent("referral_invited", { userId: user.id, filleulEmail: email, code });
+  // Laissé en TODO car @/lib/events n'existe pas encore dans ce worktree.
+
   return NextResponse.json({ ok: true, code });
 }
 

@@ -94,7 +94,7 @@ export async function GET(request: Request) {
         const cookieStore = await cookies();
         const refCode = cookieStore.get("ys_ref")?.value;
         if (refCode) {
-          await completerReferral(service, {
+          const result = await completerReferral(service, {
             code: refCode,
             filleulUserId: user.id,
             filleulEmail: user.email ?? "",
@@ -103,6 +103,19 @@ export async function GET(request: Request) {
             // /completer le fournira et complétera si besoin, idempotent).
             fingerprint: null,
           });
+          // On ne consomme plus le cookie httpOnly : le client (Fingerprint
+          // collector) a besoin du jumeau `ys_ref_pub` pour rejouer /completer
+          // AVEC le fingerprint. `ys_ref` expirera seul (maxAge ~30 min).
+          void result;
+          // TODO(merge): logEvent referral_credited | referral_blocked — dépend
+          // de la migration user_events (agent tracking). À émettre ici :
+          //   import { logEvent } from "@/lib/events";
+          //   void logEvent(
+          //     result.credited ? "referral_credited" : "referral_blocked",
+          //     { filleulUserId: user.id, code: refCode },
+          //   );
+          // Laissé en TODO : @/lib/events absent de ce worktree (réconciliation
+          // au merge). Émission best-effort, ne doit jamais casser l'auth.
         }
       } catch (referralErr) {
         // Le parrainage est secondaire : on ne casse pas la connexion pour ça.
