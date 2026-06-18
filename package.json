@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "ci:checks": "scripts/ci/check-test-mapping.sh && scripts/ci/check-no-stripe-live-key.sh && scripts/ci/check-migration-safety.sh && scripts/ci/check-env-sync.sh",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -42,6 +46,8 @@
     "lint-staged": "^16.4.0",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.4",
     "wrangler": "^4.101.0"
   }
 }

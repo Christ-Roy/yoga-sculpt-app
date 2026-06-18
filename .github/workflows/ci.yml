@@ -52,6 +52,56 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Tests unitaires (Vitest) : routes API critiques + modules métier (lib).
+  # ──────────────────────────────────────────────────────────────────────────
+  test:
+    name: Tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Checks CI maison (standard Veridian) : mapping route↔test, anti-fuite clé
+  # Stripe LIVE, migration-safety (Supabase), env-sync (code ↔ .env.example).
+  # ──────────────────────────────────────────────────────────────────────────
+  ci-checks:
+    name: CI checks (mapping / stripe / migration / env)
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 → l'historique complet est requis pour le diff vs base.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mapping route↔test
+        # BASE_REF = branche de base de la PR (push direct sur main : fallback main).
+        run: scripts/ci/check-test-mapping.sh
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+
+      - name: Aucune clé Stripe LIVE en clair
+        run: scripts/ci/check-no-stripe-live-key.sh
+
+      - name: Migration safety (Supabase)
+        run: scripts/ci/check-migration-safety.sh
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+
+      - name: ENV sync (code ↔ .env.example)
+        run: scripts/ci/check-env-sync.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Trivy : scan filesystem (CVE des dépendances) + secrets + misconfigs.
   # ──────────────────────────────────────────────────────────────────────────
   trivy:
