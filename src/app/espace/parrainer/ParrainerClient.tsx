@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ParrainageCard } from "@/components/ParrainageCard";
 import { InviteAmiForm } from "@/components/InviteAmiForm";
 import { Toast, type ToastVariant } from "@/components/Toast";
@@ -8,12 +8,13 @@ import { Toast, type ToastVariant } from "@/components/Toast";
 /**
  * Orchestrateur client de la page parrainage.
  *
- * Reçoit du Server Component le lien/code de parrainage et la liste initiale
- * des filleuls. Gère localement :
+ * Charge LUI-MÊME les données via `GET /api/parrainage` au montage (fetch
+ * navigateur → cookie de session porté nativement, contrairement au fetch SSR
+ * worker→worker qui était peu fiable sur l'edge). Gère :
+ *   - l'état loading / erreur du chargement initial ;
  *   - l'ajout optimiste d'un filleul « en attente » après une invitation 200 ;
  *   - le toast de confirmation ;
- *   - le rafraîchissement de la liste depuis `GET /api/parrainage` (pour
- *     refléter un éventuel passage « inscrit ✓ » côté serveur).
+ *   - le rafraîchissement de la liste (passage « inscrit ✓ » côté serveur).
  *
  * Mobile-first : cartes empilées, pleine largeur. La liste est triée
  * « en attente » d'abord puis par date décroissante.
@@ -25,20 +26,49 @@ export interface Filleul {
   created_at: string;
 }
 
-export function ParrainerClient({
-  code,
-  lienParrainage,
-  filleulsInitiaux,
-}: {
+interface ParrainageData {
   code: string;
   lienParrainage: string;
-  filleulsInitiaux: Filleul[];
-}) {
-  const [filleuls, setFilleuls] = useState<Filleul[]>(filleulsInitiaux);
+  filleuls: Filleul[];
+}
+
+export function ParrainerClient() {
+  const [data, setData] = useState<ParrainageData | null>(null);
+  const [erreur, setErreur] = useState(false);
+  const [filleuls, setFilleuls] = useState<Filleul[]>([]);
   const [toast, setToast] = useState<{
     message: string;
     variant: ToastVariant;
   } | null>(null);
+
+  // Chargement initial (fetch inline avec garde d'annulation : aucun setState
+  // synchrone dans l'effect).
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/parrainage", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = (await res.json()) as Partial<ParrainageData>;
+        if (typeof d.code !== "string" || typeof d.lienParrainage !== "string") {
+          throw new Error("réponse invalide");
+        }
+        if (!annule) {
+          setData({
+            code: d.code,
+            lienParrainage: d.lienParrainage,
+            filleuls: Array.isArray(d.filleuls) ? d.filleuls : [],
+          });
+          setFilleuls(Array.isArray(d.filleuls) ? d.filleuls : []);
+        }
+      } catch {
+        if (!annule) setErreur(true);
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+  }, []);
 
   /** Après une invitation acceptée : ajout optimiste + resync serveur. */
   function onInvite(email: string) {
@@ -67,13 +97,38 @@ export function ParrainerClient({
     try {
       const res = await fetch("/api/parrainage", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { filleuls?: Filleul[] };
-      if (Array.isArray(data.filleuls)) {
-        setFilleuls(data.filleuls);
+      const refresh = (await res.json()) as { filleuls?: Filleul[] };
+      if (Array.isArray(refresh.filleuls)) {
+        setFilleuls(refresh.filleuls);
       }
     } catch {
       /* on garde l'état optimiste */
     }
+  }
+
+  // État de chargement / erreur du chargement initial.
+  if (!data) {
+    return (
+      <div className="rounded-[4px] border border-border bg-surface/60 p-8 text-center">
+        <p className="text-sm leading-relaxed text-text-secondary">
+          {erreur
+            ? "Impossible de charger votre lien de parrainage pour le moment."
+            : "Chargement de votre lien de parrainage…"}
+        </p>
+        {erreur && (
+          <button
+            type="button"
+            onClick={() => {
+              setErreur(false);
+              window.location.reload();
+            }}
+            className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-[4px] border border-border bg-surface px-5 py-2.5 text-sm font-medium text-text transition-colors hover:border-accent/60 hover:bg-surface-2"
+          >
+            Réessayer
+          </button>
+        )}
+      </div>
+    );
   }
 
   const tries = [...filleuls].sort((a, b) => {
@@ -86,7 +141,7 @@ export function ParrainerClient({
 
   return (
     <div className="flex flex-col gap-6">
-      <ParrainageCard lienParrainage={lienParrainage} code={code} />
+      <ParrainageCard lienParrainage={data.lienParrainage} code={data.code} />
 
       {/* Inviter par e-mail */}
       <section
