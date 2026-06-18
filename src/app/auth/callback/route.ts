@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { enregistrerSignaux, completerReferral } from "@/lib/referral";
+import { getClientIp } from "@/lib/anti-abuse";
 
 /**
  * OAuth / magic-link callback.
@@ -9,6 +13,14 @@ import { createClient } from "@/lib/supabase/server";
  *
  * Runs on the default runtime (edge-compatible via OpenNext): only fetch-based
  * Supabase calls + cookie writes, no Node-only APIs.
+ *
+ * PARRAINAGE (V2b) : c'est ICI que le compte d'un filleul devient effectif. On
+ * en profite pour (a) capter l'IP de création (signal anti-abus) et (b) tenter
+ * de compléter un parrainage si un code a été suivi (cookie `ys_ref` déposé par
+ * le front avant le login). Ces deux opérations sont BEST-EFFORT et n'altèrent
+ * JAMAIS le flux d'auth : toute erreur est avalée (le filet de sécurité fiable
+ * reste POST /api/parrainage/completer, qui apporte aussi le fingerprint client
+ * — non captable dans ce redirect serveur sans JS).
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -65,6 +77,36 @@ export async function GET(request: Request) {
 
       if (!profile?.onboarding_completed) {
         destination = "/onboarding";
+      }
+
+      // ── PARRAINAGE (V2b) — best-effort, n'interrompt JAMAIS l'auth. ─────────
+      // (a) Capter l'IP de création comme signal anti-abus. Le fingerprint, lui,
+      //     n'est pas captable ici (pas de JS dans ce redirect) → il arrivera via
+      //     POST /api/parrainage/completer.
+      // (b) Si un code de parrainage a été suivi (cookie `ys_ref` posé par le
+      //     front avant le login), tenter de compléter le parrainage. Le crédit
+      //     reste soumis à l'anti-abus et SILENCIEUX en cas de refus.
+      try {
+        const service = createServiceClient();
+        const ip = getClientIp(request);
+        await enregistrerSignaux(service, { userId: user.id, ip });
+
+        const cookieStore = await cookies();
+        const refCode = cookieStore.get("ys_ref")?.value;
+        if (refCode) {
+          await completerReferral(service, {
+            code: refCode,
+            filleulUserId: user.id,
+            filleulEmail: user.email ?? "",
+            ip,
+            // Fingerprint indisponible côté serveur ici → null (le POST
+            // /completer le fournira et complétera si besoin, idempotent).
+            fingerprint: null,
+          });
+        }
+      } catch (referralErr) {
+        // Le parrainage est secondaire : on ne casse pas la connexion pour ça.
+        console.error("[auth/callback] Parrainage best-effort échoué :", referralErr);
       }
     }
 
