@@ -24,8 +24,8 @@ npm run dev        # → http://localhost:3000 (ou 3001 si 3000 occupé)
 1. Ouvrir `/login`.
 2. Saisir un e-mail → **« Recevoir le lien de connexion »** (magic link Supabase).
 3. Cliquer le lien reçu par mail → callback `/auth/callback` → onboarding.
-4. Onboarding (4 questions) → écran final (Cal.com + ticket).
-5. `/espace` : profil éditable + réservation.
+4. Onboarding (4 questions) → écran final qui renvoie vers `/espace/reserver`.
+5. `/espace` : profil éditable + accès réservation / mes réservations.
 
 > ✉️ **SMTP** : par défaut Supabase utilise son SMTP intégré (très bas débit,
 > ~2-3 mails/h, parfois en spam) — suffisant pour tester. Pour la prod,
@@ -49,8 +49,30 @@ npm run dev        # → http://localhost:3000 (ou 3001 si 3000 occupé)
   - `uri_allow_list` configurée : `localhost:3000`, `localhost:3001`,
     `app.yoga-sculpt.fr` (callbacks + wildcard).
   - `site_url = http://localhost:3000` (à passer en prod, voir §5).
-- **App** : login, callback, onboarding, espace, route checkout (stub),
-  proxy (protection des routes), charte noir & or.
+- **App** : login, callback, onboarding, espace (profil + mes réservations),
+  réservation maison sur Google Calendar, achat de tickets Stripe, dashboard
+  admin `/admin`, `middleware.ts` (refresh session + protection des routes),
+  charte noir & or.
+
+### Réservation = moteur maison (plus de Cal.com)
+
+Cal.com a été **retiré** (juin 2026). La réservation repose désormais sur :
+
+- **Google Calendar partagé** : Alice y pose ses créneaux (collectifs ET
+  particuliers) et gère la capacité à la main (elle retire un créneau quand il
+  est plein). Source de vérité des créneaux.
+- **Service account Google** (`src/lib/google-calendar.ts`) : l'app lit les
+  events futurs (`/api/creneaux`), ajoute/retire un attendee à la réservation/
+  annulation (`/api/reserver`, `/api/annuler`). 100 % edge (Web Crypto + fetch,
+  aucune dépendance Node).
+- **Tickets Supabase** (`tickets` + `bookings`, migration `0002_booking.sql`) :
+  réserver consomme un crédit ; annuler le restitue.
+- **Stripe** : achat de carnets de tickets (cf. §4).
+- **Routes API** : `/api/creneaux` (GET), `/api/reserver` (POST), `/api/annuler`
+  (POST), `/api/checkout` (POST, Stripe), `/api/webhooks/stripe` (POST),
+  `/api/ics/[bookingId]` (GET, export agenda).
+- **UI** : `ReserverClient` (calendrier maison), `BuyTickets` (3 formules),
+  `MesReservations`, dashboard admin sous `/admin`.
 
 ---
 
@@ -109,26 +131,31 @@ fonctionnent immédiatement.
 
 ---
 
-## 4. 💳 Phase 2 — Stripe (ticket séance)
+## 4. 💳 Stripe — carnets de tickets
 
-Aujourd'hui : bouton « Réserver une séance — 25 € » → page `/espace/reserver`
-(« Paiement bientôt disponible »). Tout est isolé pour brancher Stripe sans
-refacto :
+Modèle métier : l'utilisateur n'achète PAS une séance à l'acte, il achète des
+**crédits de séances (tickets)**. Le code est déjà branché :
 
-- `src/components/BuyTicketButton.tsx` — déjà câblé : si `/api/checkout` renvoie
-  `{ url }`, il redirige vers Stripe Checkout. Sinon → page placeholder.
-- `src/app/api/checkout/route.ts` — **stub commenté** avec le pseudo-code complet.
+- `src/components/BuyTickets.tsx` — 3 formules ; POST `/api/checkout` avec
+  `{ formule }` puis redirige vers l'URL Stripe (`session.url`). Si Stripe n'est
+  pas configuré, l'API renvoie `{ ready: false }` → « Paiement bientôt disponible ».
+- `src/app/api/checkout/route.ts` — crée une **Checkout Session** Stripe
+  (`mode=payment`) via l'API REST en `fetch` (edge-compatible, **pas** le SDK
+  Node), reliée au user par `client_reference_id` + `metadata`.
+- `src/app/api/webhooks/stripe/route.ts` — sur `checkout.session.completed`,
+  vérifie la signature (`STRIPE_WEBHOOK_SECRET`, HMAC-SHA256 timing-safe +
+  anti-replay) puis crédite la table `tickets`. **Le crédit ne se fait jamais
+  au checkout** (paiement pas encore confirmé), uniquement au webhook.
 
-**À fournir par Robert (phase 2)** : les clés du compte Stripe Yoga Sculpt →
-`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_PRICE_SEANCE` (price ID
-du ticket), `STRIPE_WEBHOOK_SECRET`. Variables déjà présentes (vides) dans
-`.env.local`.
+**À fournir par Robert** : les clés du compte Stripe Yoga Sculpt →
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, et les price IDs des formules
+`STRIPE_PRICE_COLLECTIF`, `STRIPE_PRICE_PARTICULIER`, `STRIPE_PRICE_CARTE10`
+(produits créés dans le compte Stripe d'Alice, l'app les lit, ne les crée pas).
+`STRIPE_PUBLISHABLE_KEY` est optionnelle (réservée à un futur Stripe.js).
 
-> ⚠️ **Cloudflare Workers (edge)** : ne pas brancher le SDK Stripe Node lourd.
-> Utiliser l'**API REST Stripe en `fetch`** (recommandé) ou le SDK en mode
-> `createFetchHttpClient()`. Le détail est documenté en commentaire dans
-> `route.ts`. Prévoir aussi un webhook `/api/webhooks/stripe` pour créditer le
-> ticket en base après paiement.
+> ⚠️ **Cloudflare Workers (edge)** : ne jamais brancher le SDK Stripe Node lourd.
+> On parle à Stripe uniquement via l'**API REST en `fetch`** (form-urlencoded).
+> Détail documenté en commentaire dans `checkout/route.ts`.
 
 ---
 
@@ -148,9 +175,16 @@ Fichiers déjà prêts : `open-next.config.ts`, `wrangler.jsonc`
 npx opennextjs-cloudflare build
 npx wrangler deploy          # ou: npx opennextjs-cloudflare deploy
 
-# Secrets (jamais commités) :
+# Secrets (jamais commités) — à pousser via `wrangler secret put` :
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-# ... + clés Stripe en phase 2
+npx wrangler secret put GOOGLE_CALENDAR_SA_KEY   # JSON service account (1 ligne)
+npx wrangler secret put GOOGLE_CALENDAR_ID
+npx wrangler secret put STRIPE_SECRET_KEY
+npx wrangler secret put STRIPE_WEBHOOK_SECRET
+npx wrangler secret put STRIPE_PRICE_COLLECTIF
+npx wrangler secret put STRIPE_PRICE_PARTICULIER
+npx wrangler secret put STRIPE_PRICE_CARTE10
+npx wrangler secret put ADMIN_EMAILS             # CSV des emails admin (/admin)
 # Les NEXT_PUBLIC_* peuvent aller dans [vars] de wrangler.jsonc.
 ```
 
@@ -166,19 +200,34 @@ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 
 ```
 src/
-  proxy.ts                      # Next 16 : remplace middleware.ts (refresh session + protection)
+  middleware.ts                 # Next 16 : refresh session + protection des routes
+                                #   (PAS proxy.ts — incompatible OpenNext)
   lib/
-    supabase/{client,server,proxy}.ts
+    supabase/{client,server,proxy,service}.ts  # service.ts = client service_role
     onboarding.ts               # définition des 4 questions
-    booking.ts                  # URL Cal.com + prix ticket
-  components/                   # Logo, Button, AppHeader, SignOutButton, BuyTicketButton
+    google-calendar.ts          # accès API Google Calendar (service account, edge)
+    reservation.ts              # logique métier PURE (creneaux/types/attendees)
+    calendar-export.ts          # génération .ics (VALARM J-1 / H-2)
+    db-types.ts                 # types Booking / Ticket / TicketType
+    admin.ts                    # requireAdmin() (garde serveur /admin)
+    admin-data.ts · admin-format.ts            # données + formatage du dashboard
+  components/                   # Logo, Button, AppHeader, SignOutButton, Toast,
+                                #   ReserverClient, BuyTickets, MesReservations,
+                                #   AddToCalendar, admin/*
   app/
     page.tsx                    # routeur (login / onboarding / espace selon état)
     login/                      # page + LoginForm + actions (magic link, OAuth, signout)
     auth/callback/route.ts      # exchangeCodeForSession
-    onboarding/                 # flow 4 étapes + écran final (Cal.com + ticket)
-    espace/                     # dashboard + ProfileCard + reserver/ (placeholder Stripe)
-    api/checkout/route.ts       # stub Stripe (phase 2)
-supabase/migrations/0001_init.sql
+    onboarding/                 # flow 4 étapes + écran final → /espace/reserver
+    espace/                     # dashboard + ProfileCard + reserver/ + reservations/
+    admin/page.tsx              # dashboard Alice (KPIs, créneaux, réservations)
+    api/
+      creneaux/route.ts         # GET  créneaux réservables (Google Calendar)
+      reserver/route.ts         # POST réserver (attendee Google + ticket)
+      annuler/route.ts          # POST annuler une réservation
+      checkout/route.ts         # POST Stripe Checkout (carnet de tickets)
+      webhooks/stripe/route.ts  # POST webhook Stripe (crédite les tickets)
+      ics/[bookingId]/route.ts  # GET  export .ics d'une réservation
+supabase/migrations/{0001_init.sql, 0002_booking.sql}
 open-next.config.ts · wrangler.jsonc
 ```

@@ -38,7 +38,7 @@ export default async function OnboardingPage() {
 
   const firstName = fullName?.split(/\s+/)[0] ?? null;
 
-  // Pré-remplissage du widget Cal en fin d'onboarding.
+  // Pré-remplissage de l'écran de fin d'onboarding (transmis à OnboardingFlow).
   const prefill = {
     name: fullName,
     email: profile?.email ?? user.email ?? null,
