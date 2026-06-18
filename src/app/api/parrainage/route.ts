@@ -78,5 +78,11 @@ export async function GET() {
   }));
   const ticketsGagnes = filleuls.filter((f) => f.ticketCredite).length;
 
-  return NextResponse.json({ code, filleuls, ticketsGagnes });
+  // Lien d'invitation prêt à partager (la page le rend copiable). On le
+  // construit ici à partir de l'origin de la requête pour rester correct quel
+  // que soit l'environnement (prod / staging).
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.yoga-sculpt.fr";
+  const lienParrainage = `${appUrl}/login?ref=${code}`;
+
+  return NextResponse.json({ code, lienParrainage, filleuls, ticketsGagnes });
 }
