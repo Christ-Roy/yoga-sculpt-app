@@ -12,7 +12,7 @@ import path from "node:path";
  *
  * Les globals vitest (describe/it/expect/vi) NE sont PAS exposés en global :
  * chaque test les importe explicitement depuis "vitest". Raison : le `tsconfig.json`
- * inclut `**/*.ts` (donc les tests sont typecheckés par `tsc --noEmit` en CI/pre-push).
+ * inclut tous les fichiers ".ts" (donc les tests sont typecheckés par `tsc --noEmit` en CI/pre-push).
  * Les imports explicites évitent d'avoir à ajouter `vitest/globals` aux `types` du
  * tsconfig (et donc de polluer le typage de tout le code applicatif).
  */
