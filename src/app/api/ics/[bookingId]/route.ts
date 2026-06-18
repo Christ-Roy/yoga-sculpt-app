@@ -25,9 +25,6 @@ import { buildIcs, icsFileName, type SeanceAgenda } from "@/lib/calendar-export"
  * └─────────────────────────────────────────────────────────────────────────┘
  */
 
-/** Lieu placeholder tant qu'Alice n'a pas confirmé l'adresse (ne PAS inventer). */
-const LIEU_PLACEHOLDER = "Lyon";
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ bookingId: string }> },
@@ -62,16 +59,22 @@ export async function GET(
 
   const booking = row as Booking;
 
-  // Titre : on part du type, et on enrichit best-effort depuis le summary Google
-  // (si l'event existe encore). Un échec Google ne casse PAS le téléchargement.
+  // Titre + lieu : on part du type, et on enrichit best-effort depuis l'event
+  // Google (si encore présent) — `summary` pour le titre, `location` pour le
+  // VRAI lieu (champ « Lieu » saisi par Alice). Un échec Google ne casse PAS le
+  // téléchargement, et on n'invente AUCUNE adresse (lieu absent si non saisi).
   let titre = `${libelleType(booking.type)} — Yoga Sculpt`;
+  let lieu: string | undefined;
   try {
     const event = await getEvent(booking.google_event_id);
     if (event.summary && event.summary.trim()) {
       titre = event.summary.trim();
     }
+    if (event.location && event.location.trim()) {
+      lieu = event.location.trim();
+    }
   } catch {
-    // On garde le titre dérivé du type — silencieux par design.
+    // On garde le titre dérivé du type, lieu absent — silencieux par design.
   }
 
   const seance: SeanceAgenda = {
@@ -79,7 +82,8 @@ export async function GET(
     titre,
     starts_at: booking.starts_at,
     ends_at: booking.ends_at,
-    lieu: LIEU_PLACEHOLDER,
+    // Vrai lieu Google (ou absent → ni LOCATION dans le .ics, ni invention).
+    lieu,
     description: "Séance Yoga Sculpt avec Alice Gaudry.",
   };
 
