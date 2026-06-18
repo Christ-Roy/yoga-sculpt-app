@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { AppHeader } from "@/components/AppHeader";
 import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
 import type { Ticket, TicketType } from "@/lib/db-types";
@@ -42,7 +41,6 @@ export default async function EspacePage() {
     .maybeSingle();
 
   const email = profile?.email ?? user.email ?? "";
-  const userLabel = profile?.full_name || email;
 
   // Solde de tickets (RLS user-scopée) — affiché en aperçu sur l'espace.
   const nowIso = new Date().toISOString();
@@ -65,10 +63,7 @@ export default async function EspacePage() {
   const totalTickets = solde.collectif + solde.particulier;
 
   return (
-    <>
-      <AppHeader userLabel={userLabel} />
-
-      <main className="mx-auto max-w-3xl px-5 py-8 sm:py-10">
+    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:py-10">
         <div className="mb-8 animate-fade-in-up">
           <p className="text-sm text-text-secondary">Bienvenue</p>
           <h1 className="font-display text-3xl text-text">
@@ -131,7 +126,6 @@ export default async function EspacePage() {
             </div>
           </section>
         </div>
-      </main>
-    </>
+    </div>
   );
 }

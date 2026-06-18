@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { AppHeader } from "@/components/AppHeader";
 import {
   MesReservations,
   type BookingAffichage,
@@ -30,14 +29,6 @@ export default async function ReservationsPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, email")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const userLabel = profile?.full_name || profile?.email || user.email || "";
-
   const nowIso = new Date().toISOString();
   const { data: rows } = await supabase
     .from("bookings")
@@ -57,11 +48,8 @@ export default async function ReservationsPage() {
   }));
 
   return (
-    <>
-      <AppHeader userLabel={userLabel} />
-
-      <main className="mx-auto max-w-3xl px-5 py-8 sm:py-10">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
+    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:py-10">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
           <div>
             <Link
               href="/espace"
@@ -81,8 +69,7 @@ export default async function ReservationsPage() {
           </Link>
         </div>
 
-        <MesReservations bookingsInitiaux={bookings} />
-      </main>
-    </>
+      <MesReservations bookingsInitiaux={bookings} />
+    </div>
   );
 }

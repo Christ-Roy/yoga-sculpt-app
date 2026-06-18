@@ -16,7 +16,11 @@ export function ReservationsRecentes({
   reservations: ReservationRecente[];
 }) {
   return (
-    <section aria-label="Réservations récentes">
+    <section
+      id="reservations"
+      aria-label="Réservations récentes"
+      className="scroll-mt-20"
+    >
       <h2 className="mb-4 font-display text-xl text-text">
         Réservations récentes
       </h2>
