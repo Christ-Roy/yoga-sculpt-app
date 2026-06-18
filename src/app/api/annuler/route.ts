@@ -4,7 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEvent, patchEvent } from "@/lib/google-calendar";
 import type { Booking, Ticket } from "@/lib/db-types";
-import { retirerAttendee } from "@/lib/reservation";
+import {
+  retirerAttendee,
+  dansMoinsDe,
+  DELAI_ANNULATION_HEURES,
+} from "@/lib/reservation";
 
 /**
  * POST /api/annuler — annule une réservation confirmée.
@@ -16,7 +20,8 @@ import { retirerAttendee } from "@/lib/reservation";
  *   - 401 `{ error }`     : non authentifié.
  *   - 403 `{ error }`     : le booking n'appartient pas au user.
  *   - 404 `{ error }`     : booking inexistant.
- *   - 409 `{ error }`     : déjà annulé (idempotence — on renvoie ok aussi, cf. infra).
+ *   - 409 `{ error, tooLate: true }` : créneau à moins de 24h → annulation refusée.
+ *                          (Le "déjà annulé" est, lui, idempotent → 200 ok, cf. infra.)
  *
  * ┌─────────────────────────────────────────────────────────────────────────┐
  * │ APPROCHE — symétrique de /api/reserver, dans l'ordre fail-safe :         │
@@ -108,6 +113,24 @@ export async function POST(request: Request) {
   // ── 3) Idempotence : déjà annulée → rien à faire, on renvoie ok. ────────────
   if (booking.status === "cancelled") {
     return NextResponse.json({ ok: true, alreadyCancelled: true });
+  }
+
+  // ── 3 bis) Garde serveur — règle d'annulation min 24h. ──────────────────────
+  // On REFUSE d'annuler un créneau qui démarre dans moins de
+  // DELAI_ANNULATION_HEURES (24h). Le délai est calculé sur `starts_at` lu EN
+  // BASE (source de vérité), jamais sur une date envoyée par le client : un
+  // appel API direct ne peut donc PAS contourner la règle déjà appliquée côté
+  // UI (bouton désactivé dans MesReservations.tsx, même seuil). On vérifie ce
+  // garde-fou APRÈS l'idempotence (un booking déjà annulé reste idempotent) et
+  // AVANT toute écriture : aucun recrédit, aucun passage en 'cancelled' ici.
+  if (dansMoinsDe(booking.starts_at, DELAI_ANNULATION_HEURES)) {
+    return NextResponse.json(
+      {
+        error: "Annulation impossible à moins de 24h du cours.",
+        tooLate: true,
+      },
+      { status: 409 },
+    );
   }
 
   // ── 4) Marque cancelled AVEC garde status='confirmed' (anti-concurrence). ───
