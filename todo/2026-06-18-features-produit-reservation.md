@@ -63,9 +63,10 @@ Robert a demandé "shadcn" explicitement → defaut = B si maintenu, sinon A. **
 
 ---
 
-## 4. 🎁 Offrir une séance à un ami (carte cadeau)
-**Quoi** : bouton "Offrir une séance" → l'utilisateur paie un ticket destiné à un proche,
-qui reçoit un **code cadeau** par email à utiliser sur l'app.
+## 4. 🎁 Offrir une séance à un ami (carte cadeau) — ⏸️ REPOUSSÉ (décision Robert 2026-06-18)
+**Pas dans la V2 en cours.** Seul le parrainage (§5) est retenu comme mécanique pour l'instant.
+Conservé ici pour plus tard. Quoi : bouton "Offrir une séance" → l'utilisateur paie un ticket destiné à un
+proche, qui reçoit un **code cadeau** par email à utiliser sur l'app.
 
 **Flux** :
 - Page/modal : choix de la formule (collectif/particulier/carte10) + email + message du destinataire.
@@ -78,14 +79,35 @@ qui reçoit un **code cadeau** par email à utiliser sur l'app.
 
 ---
 
-## 5. 🚀 Growth — ticket offert (parrainage + ticket-contre-avis vérifié via GMB)
-**Demande Robert** : ticket gratuit pour un ami / contre un avis Google. Compliance Google
-mise de côté (volume minuscule, on verra plus tard — décision Robert 2026-06-18).
+## 5. 🚀 Growth — ticket de PARRAINAGE (seule mécanique gratuite en V1)
+**Décision Robert 2026-06-18** : pour l'instant, UNE seule mécanique de ticket gratuit = le **parrainage**.
+PAS de ticket de bienvenue auto, PAS de cadeau payé (lot 4 repoussé). Plus tard : le ticket de parrainage
+sera **conditionné au fait de laisser un avis** (cf 5b, gated sur l'approbation API GMB). Compliance Google
+mise de côté (volume minuscule).
 
 - **5a — Parrainage (ami par email)** : l'utilisateur saisit l'email d'un ami → l'ami reçoit un ticket
-  gratuit (code ou crédit à l'inscription avec cet email). Aucune vérif. Codable maintenant.
-  Table `referrals` (parrain, email filleul, statut, ticket_credite). Recoupe le lot 4 (cadeau) — mutualiser.
-- **5c — Ticket de bienvenue** : 1 ticket d'essai à la création de compte, sans condition.
+  gratuit (code ou crédit à l'inscription avec cet email). Table `referrals` (parrain, email filleul, statut,
+  ticket_credite, ip_creation, fingerprint). Recoupe le lot 4 (cadeau, repoussé) — mutualiser plus tard.
+
+### 5-ANTI-ABUS — empêcher l'auto-parrainage par multi-comptes (demande Robert)
+But : qu'un malin ne crée pas N comptes pour s'auto-offrir N tickets. **Échec SILENCIEUX** (le bouton/la
+réclamation ne crédite rien, sans message d'erreur révélateur — on ne dit pas pourquoi).
+
+Signaux retenus = **IP + email + fingerprint** (décision Robert) :
+- **IP** : à l'inscription, stocker l'IP de création (Worker la voit via header `CF-Connecting-IP`). Au moment
+  de créditer un ticket de parrainage, si un AUTRE compte a déjà été créé depuis la même IP → échec silencieux.
+- **Email** : refuser les domaines d'emails jetables (liste de disposable domains), 1 ticket parrainage / email.
+- **Fingerprint device** : empreinte navigateur (canvas/fonts/UA/résolution → hash) stockée à l'inscription.
+  Si la même empreinte a déjà un compte → échec silencieux. Couvre le changement d'IP.
+  - ⚠️ Lib : FingerprintJS **open-source** (gratuit, contournable en navigation privée) ; la version Pro
+    (vraiment robuste) est payante — à ce volume, l'open-source suffit. Non bloquant si le fingerprint manque.
+
+**🔴 IMPOSSIBLE — adresse MAC** : un serveur web ne voit JAMAIS la MAC d'un visiteur (elle ne sort pas du
+réseau local, s'arrête au 1er routeur). Aucune API navigateur ne l'expose. **À ne PAS tenter** (demande
+initiale Robert écartée pour raison technique, pas de contournement possible).
+
+- ⚠️ Migration : colonnes `ip_creation inet`, `fingerprint text` sur `profiles` (ou table `account_signals`),
+  + table/liste `disposable_email_domains`. Anti-rejeu : 1 ticket parrainage crédité par (filleul) max.
 
 ### 5b — Ticket contre avis Google VÉRIFIÉ (idée Robert : match nom OAuth ↔ nom de l'avis via API GMB)
 Le pont qui rend la vérif possible : **les avis Google portent le nom affiché du reviewer**, et
