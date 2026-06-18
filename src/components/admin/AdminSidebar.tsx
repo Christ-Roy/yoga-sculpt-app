@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, LayoutDashboard, ListChecks, LogOut } from "lucide-react";
+import {
+  BarChart3,
+  CalendarDays,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
+  Users,
+} from "lucide-react";
 import { useTransition } from "react";
 
 import { Logo } from "@/components/Logo";
@@ -23,16 +30,15 @@ import {
 
 /**
  * Liens du dashboard admin (Alice).
- *
- * V1 : le dashboard est une page unique (`/admin`) ; Créneaux et Réservations
- * sont des sections de cette même page → ancres `#creneaux` / `#reservations`.
- * Le jour où ces sections deviennent des routes dédiées, il suffit de changer
- * les `href` ici.
+ * Back-office complet : vue d'ensemble + pages dédiées Calendrier / Réservations
+ * / Comptes / Insights.
  */
 const LIENS = [
   { href: "/admin", label: "Vue d'ensemble", icon: LayoutDashboard },
-  { href: "/admin#creneaux", label: "Créneaux", icon: CalendarDays },
-  { href: "/admin#reservations", label: "Réservations", icon: ListChecks },
+  { href: "/admin/calendrier", label: "Calendrier", icon: CalendarDays },
+  { href: "/admin/reservations", label: "Réservations", icon: ListChecks },
+  { href: "/admin/comptes", label: "Comptes", icon: Users },
+  { href: "/admin/insights", label: "Insights", icon: BarChart3 },
 ] as const;
 
 /** Sidebar du dashboard admin (charte NOIR & OR + badge « Admin »). */
@@ -65,9 +71,12 @@ export function AdminSidebar({ userLabel }: { userLabel: string }) {
               {LIENS.map((lien) => {
                 const Icone = lien.icon;
                 // « Vue d'ensemble » actif uniquement sur la page nue (sans
-                // ancre) ; les ancres ne modifient pas le pathname.
+                // ancre) ; les ancres ne modifient pas le pathname. Les routes
+                // dédiées (ex. /admin/insights) s'activent sur match exact.
                 const isActive =
-                  lien.href === "/admin" && pathname === "/admin";
+                  lien.href === "/admin"
+                    ? pathname === "/admin"
+                    : !lien.href.includes("#") && pathname === lien.href;
                 return (
                   <SidebarMenuItem key={lien.href}>
                     <SidebarMenuButton

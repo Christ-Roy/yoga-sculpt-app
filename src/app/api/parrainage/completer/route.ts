@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { completerReferral, enregistrerSignaux } from "@/lib/referral";
+import { logEvent } from "@/lib/events";
 import { getClientIp } from "@/lib/anti-abuse";
 import { hashFingerprint } from "@/lib/fingerprint";
 
@@ -90,6 +91,8 @@ export async function POST(request: Request) {
 
   // ── Complète le parrainage si un code a été suivi (sinon on s'arrête là). ───
   if (parsed.code) {
+    // Tracking : arrivée effective d'un filleul venu d'un lien (best-effort).
+    void logEvent(user.id, "referral_signup", { code: parsed.code }, { service });
     // L'issue (crédité ou non) reste INTERNE : on ne la révèle pas au client.
     await completerReferral(service, {
       code: parsed.code,

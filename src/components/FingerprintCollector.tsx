@@ -3,18 +3,28 @@
 import { useEffect } from "react";
 
 /**
- * Collecteur de fingerprint device — anti-abus du parrainage (silencieux).
+ * Collecteur de fingerprint device + complétion du parrainage (silencieux).
  *
- * Au montage, collecte des composantes non-PII permettant d'estimer si deux
- * comptes proviennent du même appareil (un parrain qui s'auto-parraine via un
- * faux filleul). Aucune lib payante : code maison léger, best-effort, jamais
- * bloquant. Les composantes sont POSTées brutes à `POST /api/parrainage/fingerprint` ;
- * c'est le SERVEUR qui les hashe (l'agent parrainage stocke un hash stable, pas
- * les valeurs en clair).
+ * Au montage (sur toutes les pages `/espace/*`), collecte des composantes
+ * non-PII permettant d'estimer si deux comptes proviennent du même appareil
+ * (un parrain qui s'auto-parraine via un faux filleul). Aucune lib payante :
+ * code maison léger, best-effort, jamais bloquant. Les composantes sont POSTées
+ * brutes ; c'est le SERVEUR qui les hashe (hash stable, jamais de valeurs en
+ * clair).
  *
- * Hypothèse d'endpoint (cf. brief) : `POST /api/parrainage/fingerprint`
- *   body `{ components: FingerprintComponents }` → 200 (réponse ignorée).
- * Si l'endpoint réel diffère, seul l'URL ci-dessous est à ajuster.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ DÉCISION D'ARCHI (V2b, recâblage e2e parrainage)                          │
+ * │   On POST vers `POST /api/parrainage/completer` — PAS un endpoint         │
+ * │   `/fingerprint` dédié (qui n'a jamais existé → 404 permanent). `/completer│
+ * │   ` accepte déjà `{ code?, fingerprint? }` : il hashe le fingerprint ET   │
+ * │   complète le parrainage en UN appel, avec le fingerprint au moment exact │
+ * │   de la décision de crédit (anti-abus R3 — impossible côté callback       │
+ * │   serveur qui n'a pas de JS). Idempotent avec le callback.                │
+ * │                                                                           │
+ * │   Le `code` de parrainage est lu du cookie `ys_ref_pub` (jumeau JS-lisible│
+ * │   de `ys_ref` httpOnly, tous deux posés par login/page.tsx). Sans cookie, │
+ * │   on POST quand même (sans code) pour enregistrer les signaux du compte.  │
+ * └─────────────────────────────────────────────────────────────────────────┘
  *
  * Transparence UX : montage discret, aucune sortie visible, échecs avalés
  * (un fingerprint manquant ne doit JAMAIS dégrader l'expérience client).
@@ -178,6 +188,38 @@ function fingerprintFonts(): string[] | undefined {
   }
 }
 
+/**
+ * Lit la valeur d'un cookie côté client (best-effort). Renvoie `null` si absent
+ * ou si `document.cookie` est indisponible.
+ */
+function lireCookie(nom: string): string | null {
+  try {
+    const cible = `${nom}=`;
+    for (const part of document.cookie.split(";")) {
+      const trimmed = part.trim();
+      if (trimmed.startsWith(cible)) {
+        return decodeURIComponent(trimmed.slice(cible.length));
+      }
+    }
+  } catch {
+    /* document.cookie indisponible → on ignore */
+  }
+  return null;
+}
+
+/**
+ * Efface le cookie JS-lisible de parrainage (best-effort) une fois la
+ * complétion tentée. On ne touche PAS au cookie httpOnly `ys_ref` (le serveur
+ * en a déjà tiré parti au callback ; il expirera seul).
+ */
+function effacerCookieRef(): void {
+  try {
+    document.cookie = "ys_ref_pub=; Max-Age=0; path=/; SameSite=Lax";
+  } catch {
+    /* ignoré */
+  }
+}
+
 /** Assemble toutes les composantes disponibles (best-effort, sans throw). */
 function collecter(): FingerprintComponents {
   const nav = navigator;
@@ -238,17 +280,39 @@ export function FingerprintCollector() {
         return; // collecte impossible → on abandonne en silence
       }
 
+      // Code de parrainage suivi par le filleul (cookie JS-lisible posé par
+      // login/page.tsx). Optionnel : sans code, on POST quand même pour
+      // enregistrer les signaux anti-abus du compte (le serveur ignore le code
+      // absent).
+      const code = lireCookie("ys_ref_pub");
+
+      // Note : l'event de tracking `referral_signup` est émis CÔTÉ SERVEUR par
+      // /api/parrainage/completer (logEvent utilise la service_role, indispo au
+      // client). Ici on se contente de POSTer code + fingerprint.
+
       // keepalive : l'envoi survit à une navigation immédiate. Échec avalé.
-      void fetch("/api/parrainage/fingerprint", {
+      // Contrat /completer : { code?, fingerprint? } → 200 { ok: true } (toujours).
+      void fetch("/api/parrainage/completer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ components }),
+        body: JSON.stringify({
+          ...(code ? { code } : {}),
+          // `/completer` accepte un objet de composantes (champ `fingerprint`).
+          fingerprint: components,
+        }),
         keepalive: true,
         // Pas de credentials explicites : le cookie de session part par défaut
         // (same-origin), ce dont l'endpoint a besoin pour rattacher au user.
-      }).catch(() => {
-        /* anti-abus best-effort : un échec réseau ne doit rien casser */
-      });
+      })
+        .then(() => {
+          // Complétion tentée une fois : on retire le cookie de parrainage pour
+          // ne pas le rejouer à chaque session (le crédit est idempotent côté
+          // serveur, mais on évite des POST inutiles). Best-effort.
+          if (code) effacerCookieRef();
+        })
+        .catch(() => {
+          /* anti-abus best-effort : un échec réseau ne doit rien casser */
+        });
     };
 
     const ric = (

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
+import { logEvent } from "@/lib/events";
 
 /**
  * OAuth / magic-link callback.
@@ -94,7 +95,7 @@ export async function GET(request: Request) {
         const cookieStore = await cookies();
         const refCode = cookieStore.get("ys_ref")?.value;
         if (refCode) {
-          await completerReferral(service, {
+          const result = await completerReferral(service, {
             code: refCode,
             filleulUserId: user.id,
             filleulEmail: user.email ?? "",
@@ -103,6 +104,16 @@ export async function GET(request: Request) {
             // /completer le fournira et complétera si besoin, idempotent).
             fingerprint: null,
           });
+          // On ne consomme plus le cookie httpOnly : le client (Fingerprint
+          // collector) a besoin du jumeau `ys_ref_pub` pour rejouer /completer
+          // AVEC le fingerprint. `ys_ref` expirera seul (maxAge ~30 min).
+          // Tracking best-effort (ne casse jamais l'auth) : crédité vs bloqué.
+          void logEvent(
+            user.id,
+            result.credited ? "referral_credited" : "referral_blocked",
+            { code: refCode },
+            { service },
+          );
         }
       } catch (referralErr) {
         // Le parrainage est secondaire : on ne casse pas la connexion pour ça.

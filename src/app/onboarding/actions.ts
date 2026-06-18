@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
+import { logEvent } from "@/lib/events";
 
 const answersSchema = z.object({
   goal: z.string().min(1).max(64),
@@ -74,6 +75,16 @@ export async function saveOnboarding(
   if (updateError) {
     return { ok: false, error: "Enregistrement impossible. Réessayez." };
   }
+
+  // ── Tracking : onboarding_completed. ────────────────────────────────────────
+  // best-effort (l'onboarding — métier — est déjà enregistré en base). Écriture
+  // via service_role (logEvent), indépendante de la session user de cette action.
+  await logEvent(
+    user.id,
+    "onboarding_completed",
+    { goal, level, frequency, availability },
+    { source: "onboarding" },
+  );
 
   return { ok: true };
 }
