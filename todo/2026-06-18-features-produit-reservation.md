@@ -69,25 +69,43 @@ qui reçoit un **code cadeau** par email à utiliser sur l'app.
 
 ---
 
-## 5. 🚀 Growth — ticket offert (parrainage + avis auto-déclaratif)
+## 5. 🚀 Growth — ticket offert (parrainage + ticket-contre-avis vérifié via GMB)
 **Demande Robert** : ticket gratuit pour un ami / contre un avis Google. Compliance Google
-explicitement mise de côté (volume minuscule, on verra plus tard — décision Robert 2026-06-18).
-
-**⚠️ Limite TECHNIQUE (pas légale), à connaître** : aucune API Google (Business Profile / Places)
-ne permet de vérifier qu'un email donné a laissé un avis — les avis ne sont pas reliés à une
-adresse exploitable côté API. Donc "vérifier automatiquement qu'un avis a été laissé" = **impossible
-à brancher**, quelle que soit l'API. On ne code donc PAS de vérification d'avis. À la place :
+mise de côté (volume minuscule, on verra plus tard — décision Robert 2026-06-18).
 
 - **5a — Parrainage (ami par email)** : l'utilisateur saisit l'email d'un ami → l'ami reçoit un ticket
-  gratuit (code ou crédit direct à l'inscription avec cet email). Aucune vérif. Codable maintenant.
+  gratuit (code ou crédit à l'inscription avec cet email). Aucune vérif. Codable maintenant.
   Table `referrals` (parrain, email filleul, statut, ticket_credite). Recoupe le lot 4 (cadeau) — mutualiser.
-- **5b — Avis auto-déclaratif (confiance)** : bouton "J'ai laissé un avis → récupérer mon ticket" qui
-  ouvre la fiche Google (lien direct) puis crédite 1 ticket au clic de retour, SANS vérification.
-  On fait confiance ; à ce volume la triche est négligeable. Anti-rejeu simple (1 fois par compte).
-- **5c — Ticket de bienvenue** : 1 ticket d'essai offert à la création de compte, sans condition.
+- **5c — Ticket de bienvenue** : 1 ticket d'essai à la création de compte, sans condition.
 
-→ V1 : faire **5a (parrainage par email)** + **5c (ticket bienvenue)** ; **5b** si Robert le veut
-(auto-déclaratif, pas de vérif). Pas de branchement API Google review (techniquement impossible).
+### 5b — Ticket contre avis Google VÉRIFIÉ (idée Robert : match nom OAuth ↔ nom de l'avis via API GMB)
+Le pont qui rend la vérif possible : **les avis Google portent le nom affiché du reviewer**, et
+**Google Sign-In nous donne le nom/prénom du compte connecté**. On croise les deux.
+
+**Mécanique** :
+1. L'utilisateur est connecté via **Google OAuth** (déjà actif sur l'app). On a `name` / `given_name` /
+   `family_name` depuis son profil OAuth (table `profiles.full_name`, ou claim OAuth à stocker).
+2. Bouton "J'ai laissé un avis → récupérer mon ticket" → ouvre la fiche Google (lien direct).
+3. Au retour, un appel serveur lit les avis via **GMB API** `accounts.locations.reviews.list`
+   (location id de la fiche Yoga Sculpt, cf. todo GMB). Pour chaque avis : `reviewer.displayName`,
+   `createTime`, `starRating`.
+4. **Match** : `displayName` de l'avis ≈ `name` du compte (normalisé : minuscules, sans accents, tolérance
+   prénom+nom / nom+prénom) **ET** `createTime` dans une fenêtre récente (ex : après la date d'inscription,
+   < 60j) → on crédite 1 ticket. Anti-rejeu : 1 crédit avis par compte (colonne `review_ticket_claimed_at`
+   sur `profiles`, ou table dédiée).
+
+**🔒 Pré-requis bloquant** : l'**API GMB doit être approuvée** (aujourd'hui quota = 0, HTTP 429, en attente
+"Basic API Access" — cf `todo/01` côté projet). Tant que 429 → ce lot ne s'active pas. Le `GOOGLE_REFRESH_TOKEN`
+a déjà le scope `business.manage` (vérifié). À activer dès approbation.
+
+**⚠️ Limites connues & ACCEPTÉES (à ce volume, négligeables)** :
+- Homonymes : le match nom est une heuristique de confiance, pas une preuve d'identité. Deux "Marie Martin" possibles.
+- Avis sous pseudo / "M. L." → pas de match → fallback : bouton "souci ? → vérif manuelle Alice" (dashboard admin).
+- Nom Google Sign-In peut différer du nom utilisé pour l'avis (compte pro vs perso). Cas marginal.
+- Pas de lien email↔avis (n'existe pas côté API) : c'est le **nom** qui sert de clé, d'où les limites ci-dessus.
+
+→ V1 immédiate : **5a (parrainage par email)** + **5c (ticket bienvenue)**.
+→ V2 (dès GMB approuvée) : **5b (ticket contre avis vérifié par match nom OAuth↔GMB)**.
 
 ---
 
