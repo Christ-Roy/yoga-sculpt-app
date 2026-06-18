@@ -21,10 +21,11 @@ import { Toast, type ToastVariant } from "@/components/Toast";
  *   - bloc « Ajouter à mon agenda » (Google + .ics avec rappels),
  *   - bouton « Annuler » → POST `/api/annuler`.
  *
- * 🔴 GARDE-FOU 24h (calculé côté client, garde-fou UI ; la règle serveur
- * arrivera dans un lot ultérieur) : si la séance démarre dans moins de 24h, le
- * bouton est DÉSACTIVÉ avec un libellé explicite. On ne désinscrit pas à la
- * dernière minute.
+ * 🔴 GARDE-FOU 24h : garde-fou UI (calculé côté client) DOUBLÉ d'une garde
+ * serveur dans `/api/annuler` (même seuil DELAI_ANNULATION_HEURES, qui renvoie
+ * 409 `{ tooLate: true }` si la séance démarre dans moins de 24h). Si la séance
+ * démarre dans moins de 24h, le bouton est DÉSACTIVÉ avec un libellé explicite.
+ * On ne désinscrit pas à la dernière minute.
  *
  * RESPONSIVE : cartes empilées, bloc agenda en colonne sur mobile / ligne ≥sm,
  * cibles ≥44px.
@@ -87,6 +88,15 @@ export function MesReservations({
         // Déjà supprimée côté serveur : on retire localement.
         setBookings((list) => list.filter((x) => x.id !== b.id));
         setToast({ message: "Réservation introuvable.", variant: "error" });
+        return;
+      }
+      if (res.status === 409) {
+        // Garde serveur 24h (tooLate) : la séance est passée sous le seuil
+        // depuis l'affichage. On garde la carte et on explique le refus.
+        setToast({
+          message: "Annulation impossible à moins de 24h du cours.",
+          variant: "error",
+        });
         return;
       }
       setToast({
