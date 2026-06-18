@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
-import { BuyTicketButton } from "@/components/BuyTicketButton";
-import { CalEmbed } from "@/components/CalEmbed";
 import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
+import type { Ticket, TicketType } from "@/lib/db-types";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
@@ -44,6 +44,26 @@ export default async function EspacePage() {
   const email = profile?.email ?? user.email ?? "";
   const userLabel = profile?.full_name || email;
 
+  // Solde de tickets (RLS user-scopée) — affiché en aperçu sur l'espace.
+  const nowIso = new Date().toISOString();
+  const { data: tickets } = await supabase
+    .from("tickets")
+    .select("type, quantite_restante, expires_at")
+    .gt("quantite_restante", 0)
+    .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
+
+  const solde = { collectif: 0, particulier: 0 };
+  for (const t of (tickets ?? []) as Pick<
+    Ticket,
+    "type" | "quantite_restante"
+  >[]) {
+    const type = t.type as TicketType;
+    if (type === "collectif" || type === "particulier") {
+      solde[type] += t.quantite_restante;
+    }
+  }
+  const totalTickets = solde.collectif + solde.particulier;
+
   return (
     <>
       <AppHeader userLabel={userLabel} />
@@ -65,30 +85,49 @@ export default async function EspacePage() {
             level={onboardingLabel("level", onboarding?.level)}
           />
 
-          {/* Réserver une séance */}
+          {/* Réserver une séance — renvoie vers le calendrier maison. */}
           <section className="rounded-[4px] border border-border bg-surface/60 p-6">
             <h2 className="font-display text-xl text-text">
               Réserver une séance
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-              Choisissez un créneau avec Alice ci-dessous — vos coordonnées sont
-              déjà pré-remplies. Ou prenez un ticket pour pratiquer quand vous
-              voulez.
+              Choisissez un créneau parmi les dates proposées par Alice, et
+              gérez vos réservations à venir.
             </p>
 
-            {/* Widget Cal.com embarqué, pré-rempli depuis le profil. */}
-            <div className="mt-5">
-              <CalEmbed
-                prefill={{
-                  name: profile?.full_name ?? null,
-                  email,
-                  phone: profile?.phone ?? null,
-                }}
-              />
-            </div>
+            <p className="mt-4 text-sm text-text">
+              {totalTickets > 0 ? (
+                <>
+                  <span className="font-semibold text-accent">
+                    {solde.collectif}
+                  </span>{" "}
+                  ticket{solde.collectif > 1 ? "s" : ""} collectif
+                  <span className="mx-2 text-text-secondary">·</span>
+                  <span className="font-semibold text-accent">
+                    {solde.particulier}
+                  </span>{" "}
+                  particulier
+                </>
+              ) : (
+                <span className="text-text-secondary">
+                  Vous n&apos;avez pas encore de ticket.
+                </span>
+              )}
+            </p>
 
-            <div className="mt-5">
-              <BuyTicketButton />
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/espace/reserver"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                Voir les créneaux
+              </Link>
+              <Link
+                href="/espace/reservations"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] border border-border bg-surface px-5 py-2.5 text-sm font-medium text-text transition-colors hover:border-accent/60 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                Mes réservations
+              </Link>
             </div>
           </section>
         </div>
