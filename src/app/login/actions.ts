@@ -75,9 +75,21 @@ export async function signInWithOAuth(
     provider,
     options: {
       redirectTo: `${origin}/auth/callback`,
+      // Explicit scopes per provider.
+      // - Google: offline access + force consent to always get a refresh token.
+      // - Azure/Microsoft: `email` is REQUIRED. Microsoft (esp. personal MSA
+      //   accounts and the /common endpoint) does NOT return an `email` claim
+      //   unless it is explicitly requested. Supabase rejects the callback with
+      //   a generic `server_error` 500 when no email is present, which is the
+      //   exact failure we saw at the end of the Microsoft sign-in flow. The
+      //   `openid email profile` set guarantees Microsoft includes the email
+      //   claim in the id_token whenever the account has one.
       ...(provider === "google"
-        ? { queryParams: { access_type: "offline", prompt: "consent" } }
-        : {}),
+        ? {
+            scopes: "openid email profile",
+            queryParams: { access_type: "offline", prompt: "consent" },
+          }
+        : { scopes: "openid email profile" }),
     },
   });
 
