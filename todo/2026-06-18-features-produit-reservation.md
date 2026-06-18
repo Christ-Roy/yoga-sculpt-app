@@ -69,25 +69,25 @@ qui reçoit un **code cadeau** par email à utiliser sur l'app.
 
 ---
 
-## 5. 🚀 Growth — ticket offert (parrainage / avis)
-**Demande Robert** : "à la création du compte, gagner un ticket si la personne laisse un avis Google favorable."
+## 5. 🚀 Growth — ticket offert (parrainage + avis auto-déclaratif)
+**Demande Robert** : ticket gratuit pour un ami / contre un avis Google. Compliance Google
+explicitement mise de côté (volume minuscule, on verra plus tard — décision Robert 2026-06-18).
 
-**🔴 ARBITRAGE IMPORTANT — récompenser un avis Google est INTERDIT (review gating).**
-Les [policies Google](https://support.google.com/contributions/answer/14260797) interdisent d'offrir une
-contrepartie (ticket, réduction) en échange d'un avis, a fortiori conditionné à "favorable". Risque RÉEL :
-suppression des avis + suspension possible de la fiche GMB d'Alice (4,8★/24 avis = son meilleur actif SEO local).
-**On ne code PAS ça tel quel.** Versions safe à la place :
+**⚠️ Limite TECHNIQUE (pas légale), à connaître** : aucune API Google (Business Profile / Places)
+ne permet de vérifier qu'un email donné a laissé un avis — les avis ne sont pas reliés à une
+adresse exploitable côté API. Donc "vérifier automatiquement qu'un avis a été laissé" = **impossible
+à brancher**, quelle que soit l'API. On ne code donc PAS de vérification d'avis. À la place :
 
-- **5a — Parrainage (RECO, 100% clean & plus efficace)** : un client parraine un ami via un lien unique.
-  Quand l'ami crée un compte + achète son 1er ticket → le parrain ET le filleul gagnent un ticket bonus.
-  Table `referrals` (code parrain, filleul, statut). Pas de problème de policy, vrai moteur de croissance.
-- **5b — Invitation à l'avis (NON récompensée)** : après une séance honorée, email/encart invitant à laisser
-  un avis Google (lien direct vers la fiche). Aucune contrepartie → conforme. Améliore le volume d'avis légitimement.
-- **5c — Ticket de bienvenue (à la création de compte)** : offrir 1 ticket d'essai (ou -X%) à l'inscription,
-  SANS condition d'avis. Simple, légal, booste la conversion. Découplé de tout avis.
+- **5a — Parrainage (ami par email)** : l'utilisateur saisit l'email d'un ami → l'ami reçoit un ticket
+  gratuit (code ou crédit direct à l'inscription avec cet email). Aucune vérif. Codable maintenant.
+  Table `referrals` (parrain, email filleul, statut, ticket_credite). Recoupe le lot 4 (cadeau) — mutualiser.
+- **5b — Avis auto-déclaratif (confiance)** : bouton "J'ai laissé un avis → récupérer mon ticket" qui
+  ouvre la fiche Google (lien direct) puis crédite 1 ticket au clic de retour, SANS vérification.
+  On fait confiance ; à ce volume la triche est négligeable. Anti-rejeu simple (1 fois par compte).
+- **5c — Ticket de bienvenue** : 1 ticket d'essai offert à la création de compte, sans condition.
 
-→ Reco : faire **5a (parrainage) + 5b (invitation avis non récompensée) + 5c (ticket de bienvenue)**.
-Abandonner la version "ticket contre avis favorable" (illégale). **Robert valide la reformulation.**
+→ V1 : faire **5a (parrainage par email)** + **5c (ticket bienvenue)** ; **5b** si Robert le veut
+(auto-déclaratif, pas de vérif). Pas de branchement API Google review (techniquement impossible).
 
 ---
 
