@@ -13,6 +13,7 @@ import {
 import { TicketsWidget } from "@/components/espace/TicketsWidget";
 import { ReserverWidget } from "@/components/espace/ReserverWidget";
 import { ParrainageWidget } from "@/components/espace/ParrainageWidget";
+import { WelcomeTicketBanner } from "@/components/espace/WelcomeTicketBanner";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
@@ -69,12 +70,20 @@ export default async function EspacePage() {
   const nowIso = new Date().toISOString();
 
   // ── Solde de tickets (RLS user-scopée). ────────────────────────────────────
+  // On lit aussi `source` pour repérer le ticket de bienvenue encore disponible
+  // (« 1ère séance offerte ») et afficher l'encart d'incitation à la 1re résa.
   const { data: tickets, error: ticketsErr } = await supabase
     .from("tickets")
-    .select("type, quantite_restante, expires_at")
+    .select("type, quantite_restante, expires_at, source")
     .gt("quantite_restante", 0)
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
   const solde = calculerSolde((tickets ?? []) as LigneSolde[]);
+
+  // Ticket de bienvenue encore consommable → on pousse fortement la 1re résa
+  // (moment d'activation clé). Vrai uniquement s'il reste une séance welcome.
+  const aTicketBienvenue = (tickets ?? []).some(
+    (t) => (t as { source?: string | null }).source === "welcome",
+  );
 
   // ── Séances confirmées à venir (RLS user-scopée). ──────────────────────────
   const { data: bookingRows } = await supabase
@@ -105,6 +114,8 @@ export default async function EspacePage() {
           {profile?.full_name || "Votre espace"}
         </h1>
       </div>
+
+      {aTicketBienvenue && <WelcomeTicketBanner />}
 
       <DashboardGrid>
         {/* Séances à venir — widget « héros », plus large sur grand écran. */}
