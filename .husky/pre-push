@@ -8,8 +8,9 @@
 #   3. test (vitest run)              ← tests routes API + lib
 #   4. check-test-mapping.sh          ← toute route API modifiée doit avoir son test
 #   5. check-no-stripe-live-key.sh    ← aucune clé Stripe LIVE en clair (CRITIQUE)
-#   6. check-migration-safety.sh      ← uniquement si une migration Supabase est touchée
-#   7. check-env-sync.sh              ← process.env.X ↔ .env.example
+#   6. check-no-dev-auth-bypass.sh    ← bypass d'auth DEV jamais activé en repo (CRITIQUE)
+#   7. check-migration-safety.sh      ← uniquement si une migration Supabase est touchée
+#   8. check-env-sync.sh              ← process.env.X ↔ .env.example
 
 set -e
 
@@ -39,7 +40,14 @@ else
   echo "⚠ scripts/ci/check-no-stripe-live-key.sh absent ou non exécutable"
 fi
 
-# ─── 6. Migration safety (conditionnel au diff). ─────────────────────────────
+# ─── 6. Bypass d'auth DEV jamais activé dans le repo (CRITIQUE) ───────────────
+if [ -x scripts/ci/check-no-dev-auth-bypass.sh ]; then
+  scripts/ci/check-no-dev-auth-bypass.sh
+else
+  echo "⚠ scripts/ci/check-no-dev-auth-bypass.sh absent ou non exécutable"
+fi
+
+# ─── 7. Migration safety (conditionnel au diff). ─────────────────────────────
 MIGRATION_CHANGED=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null | grep -E '^supabase/migrations/.+\.sql$' || true)
 if [ -n "$MIGRATION_CHANGED" ]; then
   echo "─── Migration Supabase modifiée, scan patterns destructifs ───"
@@ -50,7 +58,7 @@ if [ -n "$MIGRATION_CHANGED" ]; then
   fi
 fi
 
-# ─── 7. ENV sync (code ↔ .env.example). ──────────────────────────────────────
+# ─── 8. ENV sync (code ↔ .env.example). ──────────────────────────────────────
 if [ -x scripts/ci/check-env-sync.sh ]; then
   scripts/ci/check-env-sync.sh
 else

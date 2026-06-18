@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { DEV_AUTH_BYPASS } from "@/lib/dev-auth";
 
 /**
  * Refreshes the Supabase session on every matched request and enforces
@@ -12,6 +13,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * unless you build a brand-new redirect response copying its cookies.
  */
 export async function updateSession(request: NextRequest) {
+  // ⚠️ BYPASS DEV (cf `src/lib/dev-auth.ts`, garde env + NODE_ENV, DEV LOCAL
+  // UNIQUEMENT) : on laisse passer TOUTES les routes sans redirection login,
+  // pour itérer sur l'UI des pages protégées sans session. Tout AVANT la
+  // création du client Supabase pour ne pas dépendre d'une session. En prod
+  // DEV_AUTH_BYPASS=false (garde NODE_ENV) → ce return n'existe pas.
+  if (DEV_AUTH_BYPASS) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

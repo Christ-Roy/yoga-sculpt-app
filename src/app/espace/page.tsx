@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
 import type { Booking } from "@/lib/db-types";
@@ -37,9 +38,7 @@ const LIEU_COURS = "Parc de la Tête d'Or";
 
 export default async function EspacePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser(supabase);
 
   if (!user) {
     redirect("/login");

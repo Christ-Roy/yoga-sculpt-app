@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { AppSidebar } from "@/components/AppSidebar";
 import { SidebarTopbar } from "@/components/SidebarTopbar";
 import { FingerprintCollector } from "@/components/FingerprintCollector";
@@ -25,9 +26,7 @@ export default async function EspaceLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser(supabase);
 
   if (!user) {
     redirect("/login");

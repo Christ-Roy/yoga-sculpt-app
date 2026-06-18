@@ -93,6 +93,9 @@ jobs:
       - name: Aucune clé Stripe LIVE en clair
         run: scripts/ci/check-no-stripe-live-key.sh
 
+      - name: Bypass d'auth DEV jamais activé dans le repo
+        run: scripts/ci/check-no-dev-auth-bypass.sh
+
       - name: Migration safety (Supabase)
         run: scripts/ci/check-migration-safety.sh
         env:

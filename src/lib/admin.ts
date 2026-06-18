@@ -25,6 +25,11 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import {
+  DEV_AUTH_BYPASS,
+  DEV_BYPASS_IS_ADMIN,
+  loadDevBypassUser,
+} from "@/lib/dev-auth";
 
 /**
  * Parse la liste blanche d'emails admin depuis `ADMIN_EMAILS` (CSV).
@@ -77,6 +82,21 @@ export interface AdminContext {
  *          est autorisé.
  */
 export async function requireAdmin(): Promise<AdminContext> {
+  // ⚠️ BYPASS DEV (cf `src/lib/dev-auth.ts`, garde env + NODE_ENV, DEV LOCAL
+  // UNIQUEMENT). Si `DEV_BYPASS_ROLE=admin` → on laisse passer avec le user de
+  // test, sans exiger qu'il figure dans `ADMIN_EMAILS`. Sinon (bypass user
+  // normal) → comportement admin standard : redirige vers /espace.
+  if (DEV_AUTH_BYPASS) {
+    const devUser = await loadDevBypassUser();
+    if (!devUser) {
+      redirect("/login");
+    }
+    if (!DEV_BYPASS_IS_ADMIN && !estAdmin(devUser.email)) {
+      redirect("/espace");
+    }
+    return { userId: devUser.id, email: devUser.email ?? "dev-admin@local" };
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
