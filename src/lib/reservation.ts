@@ -106,6 +106,20 @@ export interface Creneau {
   ends_at: string;
   /** Nombre de réservations confirmées sur ce créneau (informatif). */
   inscrits: number;
+  /**
+   * Lieu du cours, repris TEL QUEL du champ `location` de l'event Google
+   * Calendar d'Alice (texte libre : "Studio Bellecour, Lyon", une adresse…).
+   *
+   * Absent (`undefined`) si Alice n'a pas renseigné le champ « Lieu » de l'event.
+   * Côté UI, on AFFICHE quand même le créneau dans ce cas (ne pas masquer un
+   * cours à cause d'une saisie oubliée) mais avec la mention « Lieu à confirmer »
+   * au lieu d'un lien Google Maps cliquable.
+   *
+   * ⚠️ Demande Robert : le lieu DEVRAIT toujours être renseigné côté Google
+   * Calendar. On ne peut pas le forcer côté Google ; à Alice de remplir le champ
+   * « Lieu » de chaque event. Cf. note dans `/api/creneaux`.
+   */
+  lieu?: string;
 }
 
 /**
@@ -128,6 +142,12 @@ export function eventVersCreneau(
   const ends_at = bornEventToIso(event.end);
   if (!starts_at || !ends_at) return null;
 
+  // Lieu : on reprend le `location` Google tel quel (texte libre), en nettoyant
+  // les espaces de bord. Une chaîne vide est traitée comme « absent » (undefined)
+  // pour que l'UI bascule sur « Lieu à confirmer » plutôt que d'afficher un lien
+  // Maps vide / une pastille creuse.
+  const lieu = event.location?.trim() || undefined;
+
   return {
     id: event.id,
     type: deduireTypeDepuisEvent(event),
@@ -135,6 +155,7 @@ export function eventVersCreneau(
     starts_at,
     ends_at,
     inscrits,
+    lieu,
   };
 }
 

@@ -12,6 +12,7 @@ import type { Booking, TicketType } from "@/lib/db-types";
 import type { SeanceAgenda } from "@/lib/calendar-export";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { BuyTickets } from "@/components/BuyTickets";
+import { LieuMaps } from "@/components/LieuMaps";
 import { Toast, type ToastVariant } from "@/components/Toast";
 
 /**
@@ -43,7 +44,10 @@ function creneauVersSeance(c: Creneau): SeanceAgenda {
     titre: c.summary?.trim() || `${libelleType(c.type)} — Yoga Sculpt`,
     starts_at: c.starts_at,
     ends_at: c.ends_at,
-    lieu: "Lyon", // placeholder tant qu'Alice n'a pas confirmé l'adresse
+    // Vrai lieu de l'event Google (champ « Lieu »). Si Alice ne l'a pas
+    // renseigné, on n'invente rien : `lieu` reste absent et n'apparaît ni dans
+    // le lien Google Agenda ni dans le .ics.
+    lieu: c.lieu,
     description: "Séance Yoga Sculpt avec Alice Gaudry.",
   };
 }
@@ -360,6 +364,10 @@ function CreneauCard({
               {creneau.summary}
             </p>
           )}
+          {/* Lieu cliquable (Google Maps) — ou « Lieu à confirmer » si absent. */}
+          <div className="mt-1.5">
+            <LieuMaps lieu={creneau.lieu} />
+          </div>
         </div>
 
         <div className="shrink-0">
