@@ -114,8 +114,6 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET      --env staging
 npx wrangler secret put STRIPE_PRICE_COLLECTIF     --env staging
 npx wrangler secret put STRIPE_PRICE_PARTICULIER   --env staging
 npx wrangler secret put STRIPE_PRICE_CARTE10       --env staging
-npx wrangler secret put CALCOM_API_KEY             --env staging
-npx wrangler secret put CALCOM_WEBHOOK_SECRET      --env staging
 # PAS de CRON_SECRET en staging : aucun cron n'y tourne (anti-mails-fantômes).
 
 # --- PRODUCTION (Worker yoga-sculpt-app) ---
@@ -131,8 +129,6 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET      --env production
 npx wrangler secret put STRIPE_PRICE_COLLECTIF     --env production
 npx wrangler secret put STRIPE_PRICE_PARTICULIER   --env production
 npx wrangler secret put STRIPE_PRICE_CARTE10       --env production
-npx wrangler secret put CALCOM_API_KEY             --env production
-npx wrangler secret put CALCOM_WEBHOOK_SECRET      --env production
 ```
 
 > **Brevo en staging** : si on ne veut envoyer **aucun** mail de test depuis
