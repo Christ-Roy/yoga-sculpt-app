@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
-import { CALCOM_BOOKING_URL, TICKET_PRICE_EUR } from "@/lib/booking";
+import { calBookingUrlWithPrefill, TICKET_PRICE_EUR } from "@/lib/booking";
 
 export const metadata: Metadata = {
   title: "Réserver un ticket — Yoga Sculpt",
@@ -21,11 +21,18 @@ export default async function ReserverPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, email")
+    .select("full_name, email, phone")
     .eq("id", user.id)
     .maybeSingle();
 
   const userLabel = profile?.full_name || profile?.email || user.email || "";
+
+  // Lien Cal pré-rempli depuis le profil (name / email / téléphone).
+  const bookingUrl = calBookingUrlWithPrefill({
+    name: profile?.full_name ?? null,
+    email: profile?.email ?? user.email ?? null,
+    phone: profile?.phone ?? null,
+  });
 
   return (
     <>
@@ -55,7 +62,7 @@ export default async function ReserverPage() {
 
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <a
-              href={CALCOM_BOOKING_URL}
+              href={bookingUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-3 text-sm font-medium tracking-wide text-[#0e0e0e] transition-colors hover:bg-accent-dark"

@@ -20,7 +20,7 @@ export default async function OnboardingPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("onboarding_completed, full_name")
+    .select("onboarding_completed, full_name, email, phone")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -29,14 +29,25 @@ export default async function OnboardingPage() {
     redirect("/espace");
   }
 
-  const firstName =
-    profile?.full_name?.trim().split(/\s+/)[0] ??
-    user.user_metadata?.full_name?.trim().split(/\s+/)[0] ??
+  const fullName =
+    profile?.full_name?.trim() ||
+    (typeof user.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name.trim()
+      : null) ||
     null;
+
+  const firstName = fullName?.split(/\s+/)[0] ?? null;
+
+  // Pré-remplissage du widget Cal en fin d'onboarding.
+  const prefill = {
+    name: fullName,
+    email: profile?.email ?? user.email ?? null,
+    phone: profile?.phone ?? null,
+  };
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-5 py-12">
-      <OnboardingFlow firstName={firstName} />
+      <OnboardingFlow firstName={firstName} prefill={prefill} />
     </main>
   );
 }

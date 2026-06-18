@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/AppHeader";
 import { BuyTicketButton } from "@/components/BuyTicketButton";
+import { CalEmbed } from "@/components/CalEmbed";
 import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
-import { CALCOM_BOOKING_URL } from "@/lib/booking";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
@@ -71,28 +71,23 @@ export default async function EspacePage() {
               Réserver une séance
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-              Choisissez un créneau avec Alice, ou prenez un ticket pour
-              pratiquer quand vous voulez.
+              Choisissez un créneau avec Alice ci-dessous — vos coordonnées sont
+              déjà pré-remplies. Ou prenez un ticket pour pratiquer quand vous
+              voulez.
             </p>
 
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <a
-                href={CALCOM_BOOKING_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-[4px] border border-border bg-surface px-5 py-3 text-sm font-medium tracking-wide text-text transition-colors hover:border-accent/60 hover:bg-surface-2"
-              >
-                Voir les créneaux
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M7 17L17 7M17 7H8M17 7v9"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </a>
+            {/* Widget Cal.com embarqué, pré-rempli depuis le profil. */}
+            <div className="mt-5">
+              <CalEmbed
+                prefill={{
+                  name: profile?.full_name ?? null,
+                  email,
+                  phone: profile?.phone ?? null,
+                }}
+              />
+            </div>
+
+            <div className="mt-5">
               <BuyTicketButton />
             </div>
           </section>

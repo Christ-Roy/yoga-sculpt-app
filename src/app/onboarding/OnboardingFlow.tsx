@@ -5,13 +5,20 @@ import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/Button";
 import { BuyTicketButton } from "@/components/BuyTicketButton";
+import { CalEmbed } from "@/components/CalEmbed";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
-import { CALCOM_BOOKING_URL } from "@/lib/booking";
+import type { BookingPrefill } from "@/lib/booking";
 import { saveOnboarding } from "./actions";
 
 type Answers = Record<string, string>;
 
-export function OnboardingFlow({ firstName }: { firstName?: string | null }) {
+export function OnboardingFlow({
+  firstName,
+  prefill,
+}: {
+  firstName?: string | null;
+  prefill: BookingPrefill;
+}) {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>({});
@@ -57,12 +64,14 @@ export function OnboardingFlow({ firstName }: { firstName?: string | null }) {
 
   // ───────────────────────── Écran de conclusion ─────────────────────────
   if (done) {
+    const hasPhone = Boolean(prefill.phone?.trim());
+
     return (
-      <div className="w-full max-w-lg animate-fade-in-up">
+      <div className="w-full max-w-2xl animate-fade-in-up">
         <div className="mb-8 text-center">
           <Logo className="text-xl" />
         </div>
-        <div className="rounded-[4px] border border-border bg-surface/60 p-7 sm:p-9">
+        <div className="rounded-[4px] border border-border bg-surface/60 p-6 sm:p-8">
           <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
@@ -79,29 +88,23 @@ export function OnboardingFlow({ firstName }: { firstName?: string | null }) {
             C&apos;est parti{firstName ? `, ${firstName}` : ""} !
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-text-secondary">
-            Votre profil est prêt. Réservez votre première séance avec Alice,
-            ou prenez un ticket pour pratiquer quand vous voulez.
+            Votre profil est prêt. Choisissez ci-dessous un créneau pour votre
+            première séance avec Alice — vos coordonnées sont déjà pré-remplies.
           </p>
 
-          <div className="mt-7 flex flex-col gap-3">
-            <a
-              href={CALCOM_BOOKING_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-3 text-sm font-medium tracking-wide text-[#0e0e0e] transition-colors hover:bg-accent-dark"
-            >
-              Réserver une première séance
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M7 17L17 7M17 7H8M17 7v9"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </a>
+          {!hasPhone && (
+            <p className="mt-4 rounded-[4px] border border-border bg-surface px-4 py-3 text-xs leading-relaxed text-text-secondary">
+              Astuce : renseignez votre téléphone dans votre profil pour le
+              pré-remplir automatiquement lors de la réservation.
+            </p>
+          )}
 
+          {/* Widget Cal.com embarqué, pré-rempli depuis le profil. */}
+          <div className="mt-6">
+            <CalEmbed prefill={prefill} />
+          </div>
+
+          <div className="mt-7 flex flex-col gap-3">
             <BuyTicketButton className="w-full" />
 
             <Button
