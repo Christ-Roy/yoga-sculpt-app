@@ -66,18 +66,36 @@ export function ReserverClient({
   // Créneau dont la réservation est en cours (spinner ciblé).
   const [enCours, setEnCours] = useState<string | null>(null);
 
+  // Init paresseuse : le statut Stripe est connu dès le render (searchParams),
+  // donc on calcule le toast initial directement plutôt que via un effect
+  // (évite un setState synchrone dans useEffect → cascading renders).
   const [toast, setToast] = useState<{
     message: string;
     variant: ToastVariant;
-  } | null>(null);
+  } | null>(() => {
+    if (statusParam === "success") {
+      return {
+        message:
+          "Paiement reçu, merci ! Vos tickets sont crédités sous quelques secondes.",
+        variant: "success",
+      };
+    }
+    if (statusParam === "cancel") {
+      return { message: "Paiement annulé.", variant: "error" };
+    }
+    return null;
+  });
 
   // Type à mettre en avant dans le bloc d'achat (après un 402).
   const [achatType, setAchatType] = useState<TicketType | null>(null);
   const achatRef = useRef<HTMLDivElement>(null);
 
   // ── Chargement des créneaux. ───────────────────────────────────────────────
-  const charger = useCallback(async () => {
-    setErreur(null);
+  // `reset` n'efface l'erreur que lors d'un rechargement manuel (bouton
+  // « réessayer » / après réservation). Les setState ne se produisent qu'après
+  // l'await (jamais synchrones), donc pas de cascading render.
+  const charger = useCallback(async (reset = true) => {
+    if (reset) setErreur(null);
     try {
       const res = await fetch("/api/creneaux", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -89,22 +107,28 @@ export function ReserverClient({
     }
   }, []);
 
+  // Chargement initial au montage. Fetch inline (avec garde d'annulation) plutôt
+  // qu'un appel direct à charger() : aucun setState n'est appelé de façon
+  // synchrone dans l'effect, ils sont tous derrière l'await ou la garde.
   useEffect(() => {
-    void charger();
-  }, [charger]);
-
-  // ── Retour Stripe : toast informatif une seule fois. ────────────────────────
-  useEffect(() => {
-    if (statusParam === "success") {
-      setToast({
-        message:
-          "Paiement reçu, merci ! Vos tickets sont crédités sous quelques secondes.",
-        variant: "success",
-      });
-    } else if (statusParam === "cancel") {
-      setToast({ message: "Paiement annulé.", variant: "error" });
-    }
-  }, [statusParam]);
+    let annule = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/creneaux", { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as { creneaux: Creneau[] };
+        if (!annule) setCreneaux(data.creneaux ?? []);
+      } catch {
+        if (!annule) {
+          setErreur("Impossible de charger les créneaux pour le moment.");
+          setCreneaux([]);
+        }
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+  }, []);
 
   // ── Réservation d'un créneau. ───────────────────────────────────────────────
   async function reserver(c: Creneau) {
