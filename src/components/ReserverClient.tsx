@@ -286,20 +286,30 @@ export function ReserverClient({
 // ============================================================================
 
 function SoldeBadge({ solde }: { solde: SoldeTickets }) {
+  const total = solde.collectif + solde.particulier;
   return (
-    <div className="rounded-[4px] border border-border bg-surface/60 p-4">
-      <p className="text-xs uppercase tracking-widest text-text-secondary">
-        Mes tickets
-      </p>
-      <p className="mt-1.5 text-sm text-text">
-        <span className="font-semibold text-accent">{solde.collectif}</span>{" "}
-        ticket{solde.collectif > 1 ? "s" : ""} collectif
-        <span className="mx-2 text-text-secondary">·</span>
-        <span className="font-semibold text-accent">
-          {solde.particulier}
-        </span>{" "}
-        particulier
-      </p>
+    <div className="flex items-center justify-between gap-3 rounded-[4px] border border-border bg-surface/60 p-4">
+      <div className="min-w-0">
+        <p className="text-xs uppercase tracking-widest text-text-secondary">
+          Mes tickets
+        </p>
+        <p className="mt-1.5 text-sm text-text">
+          <span className="font-semibold text-accent">{solde.collectif}</span>{" "}
+          ticket{solde.collectif > 1 ? "s" : ""} collectif
+          <span className="mx-2 text-text-secondary">·</span>
+          <span className="font-semibold text-accent">
+            {solde.particulier}
+          </span>{" "}
+          particulier
+        </p>
+      </div>
+      {/* Total agrégé bien visible (pastille OR). */}
+      <span
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/50 bg-accent/10 px-3 py-1 text-sm font-semibold text-accent"
+        aria-label={`${total} ticket${total > 1 ? "s" : ""} au total`}
+      >
+        {total} ticket{total > 1 ? "s" : ""}
+      </span>
     </div>
   );
 }
