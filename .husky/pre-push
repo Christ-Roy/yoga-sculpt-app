@@ -1,4 +1,60 @@
-# Avant un push : lint complet (src) + typecheck. Empêche de pousser du code qui
-# ne compile pas. On évite `next build` ici (trop lent pour un hook) — la CI
-# GitHub Actions fait le build complet sur le serveur.
-npm run lint && npm run typecheck
+#!/usr/bin/env sh
+# Standard CI Veridian — pre-push hook (Yoga Sculpt espace client).
+# JAMAIS --no-verify en usage normal.
+#
+# Enchaîne (set -e, le premier échec stoppe le push) :
+#   1. lint (eslint src)
+#   2. typecheck (tsc --noEmit)
+#   3. test (vitest run)              ← tests routes API + lib
+#   4. check-test-mapping.sh          ← toute route API modifiée doit avoir son test
+#   5. check-no-stripe-live-key.sh    ← aucune clé Stripe LIVE en clair (CRITIQUE)
+#   6. check-migration-safety.sh      ← uniquement si une migration Supabase est touchée
+#   7. check-env-sync.sh              ← process.env.X ↔ .env.example
+
+set -e
+
+# BASE_REF : commits non encore poussés sur la branche courante, fallback main.
+BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD)}"
+if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+  BASE_REF="origin/main"
+fi
+export BASE_REF
+
+# ─── 1-3. Qualité + tests ────────────────────────────────────────────────────
+npm run lint
+npm run typecheck
+npm run test
+
+# ─── 4. Mapping route↔test ───────────────────────────────────────────────────
+if [ -x scripts/ci/check-test-mapping.sh ]; then
+  scripts/ci/check-test-mapping.sh
+else
+  echo "⚠ scripts/ci/check-test-mapping.sh absent ou non exécutable"
+fi
+
+# ─── 5. Aucune clé Stripe LIVE en clair ──────────────────────────────────────
+if [ -x scripts/ci/check-no-stripe-live-key.sh ]; then
+  scripts/ci/check-no-stripe-live-key.sh
+else
+  echo "⚠ scripts/ci/check-no-stripe-live-key.sh absent ou non exécutable"
+fi
+
+# ─── 6. Migration safety (conditionnel au diff). ─────────────────────────────
+MIGRATION_CHANGED=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null | grep -E '^supabase/migrations/.+\.sql$' || true)
+if [ -n "$MIGRATION_CHANGED" ]; then
+  echo "─── Migration Supabase modifiée, scan patterns destructifs ───"
+  if [ -x scripts/ci/check-migration-safety.sh ]; then
+    scripts/ci/check-migration-safety.sh
+  else
+    echo "⚠ scripts/ci/check-migration-safety.sh absent ou non exécutable"
+  fi
+fi
+
+# ─── 7. ENV sync (code ↔ .env.example). ──────────────────────────────────────
+if [ -x scripts/ci/check-env-sync.sh ]; then
+  scripts/ci/check-env-sync.sh
+else
+  echo "⚠ scripts/ci/check-env-sync.sh absent ou non exécutable"
+fi
+
+exit 0

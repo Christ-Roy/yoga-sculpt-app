@@ -1,0 +1,17 @@
+# tests-pending.txt — Allowlist de dette de tests (route↔test)
+#
+# Liste les fichiers source du scope NUCLEAR (routes API) autorisés à ne PAS
+# avoir leur test colocalisé, faute assumée et tracée. check-test-mapping.sh les
+# laisse passer avec un WARNING (non bloquant). À résorber progressivement.
+#
+# Format : un chemin source par ligne (relatif à la racine du repo).
+# Les lignes commençant par # et les lignes vides sont ignorées.
+
+# ── Route ICS ────────────────────────────────────────────────────────────────
+# GET /api/ics/[bookingId] : génère un .ics de réservation. Toute la logique de
+# génération (VEVENT, 2 VALARM J-1/H-2, échappement RFC 5545, nom de fichier) vit
+# dans src/lib/calendar-export.ts, qui EST couvert par __tests__/lib/calendar-export.test.ts.
+# La route elle-même n'ajoute qu'une lecture Supabase user-scopée (RLS) + le
+# branchement des en-têtes HTTP de téléchargement. Test route à ajouter quand on
+# touchera à sa logique (mock RLS + Content-Disposition).
+src/app/api/ics/[bookingId]/route.ts
