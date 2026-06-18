@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Utilities d'animation (animate-in/out, slide-in, fade, zoom) requises par les
+   composants shadcn (Sheet/drawer mobile, Tooltip). Remplaçant Tailwind 4 de
+   tailwindcss-animate. */
+@import "tw-animate-css";
 
 /* ==========================================================================
    Yoga Sculpt — Espace client
@@ -15,6 +19,16 @@
   --text-secondary: #b8b4ad; /* texte secondaire */
   --border: #2a2a2a; /* bordures */
   --radius: 4px;
+
+  /* ----- Tokens shadcn Sidebar (reskinnés NOIR & OR) -----
+     La sidebar utilise un fond légèrement plus sombre que les surfaces de
+     contenu pour la détacher, et l'état actif/hover passe en OR. */
+  --sidebar: #0b0b0b; /* fond sidebar (un cran sous --bg) */
+  --sidebar-foreground: #b8b4ad; /* libellés au repos (texte secondaire) */
+  --sidebar-accent: #1a1a1a; /* fond hover / item actif (= surface-2) */
+  --sidebar-accent-foreground: #d4ad6a; /* texte hover / actif = OR */
+  --sidebar-border: #2a2a2a; /* bordures internes sidebar */
+  --sidebar-ring: #d4ad6a; /* anneau focus = OR */
 }
 
 @theme inline {
@@ -26,6 +40,14 @@
   --color-text: var(--text);
   --color-text-secondary: var(--text-secondary);
   --color-border: var(--border);
+
+  /* Couleurs sidebar exposées comme utilities Tailwind (bg-sidebar, etc.). */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 
   --font-display: var(--font-anton);
   --font-sans: var(--font-inter);

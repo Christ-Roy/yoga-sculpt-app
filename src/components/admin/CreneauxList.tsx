@@ -20,7 +20,7 @@ export function CreneauxList({
   creneaux: CreneauAvecInscrits[];
 }) {
   return (
-    <section aria-label="Créneaux à venir">
+    <section id="creneaux" aria-label="Créneaux à venir" className="scroll-mt-20">
       <div className="mb-4 flex flex-col gap-1">
         <h2 className="font-display text-xl text-text">Créneaux à venir</h2>
         <p className="text-xs text-text-secondary">

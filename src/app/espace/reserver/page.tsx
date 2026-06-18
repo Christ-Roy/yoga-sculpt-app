@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { AppHeader } from "@/components/AppHeader";
 import { ReserverClient } from "@/components/ReserverClient";
 import type { Ticket, TicketType } from "@/lib/db-types";
 
@@ -33,14 +32,6 @@ export default async function ReserverPage({
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, email")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const userLabel = profile?.full_name || profile?.email || user.email || "";
-
   // Solde de tickets (RLS : le user ne voit que les siens). On agrège les
   // quantités restantes valides par type.
   const nowIso = new Date().toISOString();
@@ -66,11 +57,8 @@ export default async function ReserverPage({
     status === "success" || status === "cancel" ? status : null;
 
   return (
-    <>
-      <AppHeader userLabel={userLabel} />
-
-      <main className="mx-auto max-w-3xl px-5 py-8 sm:py-10">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
+    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:py-10">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 animate-fade-in-up">
           <div>
             <Link
               href="/espace"
@@ -90,8 +78,7 @@ export default async function ReserverPage({
           </Link>
         </div>
 
-        <ReserverClient soldeInitial={solde} statusParam={statusParam} />
-      </main>
-    </>
+      <ReserverClient soldeInitial={solde} statusParam={statusParam} />
+    </div>
   );
 }
