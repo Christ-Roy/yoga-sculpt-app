@@ -41,7 +41,15 @@ import { isDisposableEmail } from "@/lib/anti-abuse";
 
 const bodySchema = z
   .object({
-    email: z.email({ error: "Adresse e-mail invalide." }),
+    // On normalise (trim + minuscules) AVANT de valider le format : un e-mail
+    // collé avec des espaces/majuscules ne doit pas être rejeté en 400 — il est
+    // nettoyé puis validé (sinon les checks self-invite/jetable en aval seraient
+    // court-circuités par un faux 400 sur un e-mail pourtant valide).
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .pipe(z.email({ error: "Adresse e-mail invalide." })),
   })
   .strict();
 
