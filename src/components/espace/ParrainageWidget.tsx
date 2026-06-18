@@ -6,6 +6,7 @@ import { Gift } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { WidgetCard, WidgetEmpty } from "@/components/espace/WidgetCard";
+import { ShareInvitation } from "@/components/ShareInvitation";
 
 /**
  * Widget « Parrainer un ami » — lecture SEULE de l'état du parrainage.
@@ -38,7 +39,6 @@ interface ParrainageData {
 export function ParrainageWidget() {
   const [data, setData] = useState<ParrainageData | null>(null);
   const [etat, setEtat] = useState<"loading" | "ok" | "error">("loading");
-  const [copie, setCopie] = useState(false);
 
   useEffect(() => {
     let annule = false;
@@ -67,36 +67,6 @@ export function ParrainageWidget() {
       annule = true;
     };
   }, []);
-
-  async function copier(lien: string) {
-    let ok = false;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(lien);
-        ok = true;
-      }
-    } catch {
-      ok = false;
-    }
-    if (!ok) {
-      try {
-        const ta = document.createElement("textarea");
-        ta.value = lien;
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        ok = document.execCommand("copy");
-        document.body.removeChild(ta);
-      } catch {
-        ok = false;
-      }
-    }
-    if (ok) {
-      setCopie(true);
-      window.setTimeout(() => setCopie(false), 2500);
-    }
-  }
 
   return (
     <WidgetCard
@@ -132,42 +102,14 @@ export function ParrainageWidget() {
 
       {etat === "ok" && data && (
         <>
-          <p className="text-sm leading-relaxed text-text-secondary">
+          <p className="mb-4 text-sm leading-relaxed text-text-secondary">
             Partagez votre lien : dès qu&apos;un ami crée son compte grâce à vous,{" "}
             <span className="text-text">un ticket vous est offert</span>.
           </p>
 
-          <div className="mt-3">
-            <label
-              htmlFor="widget-ref-link"
-              className="text-xs uppercase tracking-widest text-text-secondary"
-            >
-              Votre lien
-            </label>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input
-                id="widget-ref-link"
-                type="text"
-                readOnly
-                value={data.lienParrainage}
-                onFocus={(e) => e.currentTarget.select()}
-                className="min-h-[44px] flex-1 select-all rounded-[4px] border border-border bg-surface px-3 py-2.5 text-sm text-text focus:border-accent focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => void copier(data.lienParrainage)}
-                aria-label="Copier le lien de parrainage"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] border border-border bg-surface px-5 py-2.5 text-sm font-medium text-text transition-colors hover:border-accent/60 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                {copie ? "Copié ✓" : "Copier"}
-              </button>
-            </div>
-            <span className="sr-only" role="status" aria-live="polite">
-              {copie ? "Lien copié dans le presse-papiers." : ""}
-            </span>
-          </div>
+          <ShareInvitation lienParrainage={data.lienParrainage} compact />
 
-          <p className="mt-3 text-sm text-text-secondary">
+          <p className="mt-4 text-sm text-text-secondary">
             {data.nbInscrits > 0 ? (
               <>
                 <span className="font-semibold text-accent">{data.nbInscrits}</span>{" "}
