@@ -33,7 +33,7 @@ export type BookingPrefill = {
  * Mapping vérifié en réel (juin 2026) sur `alice-cbmnu0/cours-particulier` :
  *   - `name`  → champ "Nom complet"  (pré-remplissage OK)
  *   - `email` → champ "Email"        (pré-remplissage OK)
- *   - `attendeePhoneNumber` → champ téléphone (slug standard Cal). Le champ
+ *   - `telephone` → champ téléphone (slug standard Cal). Le champ
  *     n'est rendu QUE s'il est activé côté Cal sur l'event ; tant qu'il ne
  *     l'est pas, la clé est simplement ignorée par Cal — donc inoffensive.
  *
@@ -47,7 +47,7 @@ export function calPrefillConfig(prefill: BookingPrefill): Record<string, string
 
   if (name) config.name = name;
   if (email) config.email = email;
-  if (phone) config.attendeePhoneNumber = phone;
+  if (phone) config.telephone = phone;
 
   return config;
 }
