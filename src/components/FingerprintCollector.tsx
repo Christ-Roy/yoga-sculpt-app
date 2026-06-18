@@ -286,12 +286,9 @@ export function FingerprintCollector() {
       // absent).
       const code = lireCookie("ys_ref_pub");
 
-      // TODO(merge): logEvent referral_signup — dépend de la migration
-      // user_events (agent tracking). À émettre ICI quand un code est présent
-      // (arrivée effective d'un filleul venu d'un lien de parrainage) :
-      //   if (code) void logEvent("referral_signup", { code });
-      // import résilient depuis "@/lib/events" (le module n'existe pas encore
-      // dans ce worktree — le team-lead réconciliera au merge).
+      // Note : l'event de tracking `referral_signup` est émis CÔTÉ SERVEUR par
+      // /api/parrainage/completer (logEvent utilise la service_role, indispo au
+      // client). Ici on se contente de POSTer code + fingerprint.
 
       // keepalive : l'envoi survit à une navigation immédiate. Échec avalé.
       // Contrat /completer : { code?, fingerprint? } → 200 { ok: true } (toujours).

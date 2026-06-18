@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getOrCreateCode, normaliserEmail } from "@/lib/referral";
 import { isDisposableEmail } from "@/lib/anti-abuse";
 import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
+import { logEvent } from "@/lib/events";
 
 /**
  * POST /api/parrainage/inviter — le membre connecté invite un filleul par e-mail.
@@ -146,11 +147,8 @@ export async function POST(request: Request) {
     },
   );
 
-  // TODO(merge): logEvent referral_invited — dépend de la migration user_events
-  // (agent tracking). À émettre ici (invitation enregistrée), best-effort :
-  //   import { logEvent } from "@/lib/events";
-  //   void logEvent("referral_invited", { userId: user.id, filleulEmail: email, code });
-  // Laissé en TODO car @/lib/events n'existe pas encore dans ce worktree.
+  // Tracking : invitation enregistrée (best-effort, ne bloque jamais).
+  void logEvent(user.id, "referral_invited", { filleulEmail: email, code });
 
   return NextResponse.json({ ok: true, code });
 }
