@@ -10,32 +10,46 @@ import {
 
 const initialState: AuthState = {};
 
+// Vrai logo Google officiel (G multicolore, 4 couleurs brand) — viewBox 0 0 48 48.
 function GoogleIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 48 48"
+      aria-hidden
+      className="shrink-0"
+    >
       <path
-        fill="#FFC107"
-        d="M43.6 20.5H42V20H24v8h11.3C33.6 32.9 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.5 29.5 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.4-.4-3.5z"
+        fill="#4285F4"
+        d="M47.532 24.552c0-1.566-.127-3.06-.366-4.5H24.48v8.515h12.96c-.558 3.006-2.255 5.552-4.806 7.262v6.038h7.774c4.546-4.186 7.124-10.354 7.124-17.315z"
       />
       <path
-        fill="#FF3D00"
-        d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.5 29.5 4.5 24 4.5 16.3 4.5 9.7 8.9 6.3 14.7z"
+        fill="#34A853"
+        d="M24.48 48c6.48 0 11.916-2.148 15.888-5.814l-7.774-6.038c-2.154 1.446-4.91 2.3-8.114 2.3-6.24 0-11.524-4.214-13.412-9.882H3.04v6.234C6.99 42.65 14.13 48 24.48 48z"
       />
       <path
-        fill="#4CAF50"
-        d="M24 43.5c5.4 0 10.3-2.1 13.9-5.4l-6.4-5.4C29.4 34.4 26.8 35.5 24 35.5c-5.2 0-9.6-3.1-11.3-7.6l-6.5 5C9.6 39 16.2 43.5 24 43.5z"
+        fill="#FBBC05"
+        d="M11.068 28.566A14.43 14.43 0 0 1 10.32 24c0-1.584.27-3.12.748-4.566V13.2H3.04A23.98 23.98 0 0 0 .48 24c0 3.874.93 7.54 2.56 10.8l8.028-6.234z"
       />
       <path
-        fill="#1976D2"
-        d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.4 5.4C41.6 36.5 43.5 30.7 43.5 24c0-1.2-.1-2.4-.4-3.5z"
+        fill="#EA4335"
+        d="M24.48 9.552c3.522 0 6.684 1.21 9.168 3.586l6.876-6.876C36.39 2.39 30.954 0 24.48 0 14.13 0 6.99 5.35 3.04 13.2l8.028 6.234c1.888-5.668 7.172-9.882 13.412-9.882z"
       />
     </svg>
   );
 }
 
+// Vrai logo Microsoft officiel (4 carrés rouge/vert/bleu/jaune).
 function MicrosoftIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden>
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 23 23"
+      aria-hidden
+      className="shrink-0"
+    >
       <path fill="#f25022" d="M1 1h10v10H1z" />
       <path fill="#7fba00" d="M12 1h10v10H12z" />
       <path fill="#00a4ef" d="M1 12h10v10H1z" />
@@ -76,7 +90,9 @@ export function LoginForm({ initialError }: { initialError?: string }) {
           disabled={isOAuthPending}
           className="w-full justify-center"
         >
-          <GoogleIcon />
+          <span className="flex w-5 justify-center">
+            <GoogleIcon />
+          </span>
           Continuer avec Google
         </Button>
         <Button
@@ -86,7 +102,9 @@ export function LoginForm({ initialError }: { initialError?: string }) {
           disabled={isOAuthPending}
           className="w-full justify-center"
         >
-          <MicrosoftIcon />
+          <span className="flex w-5 justify-center">
+            <MicrosoftIcon />
+          </span>
           Continuer avec Microsoft
         </Button>
       </div>
