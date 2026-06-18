@@ -102,11 +102,17 @@ export async function GET() {
   }
 
   // ── 3) Mapping event → créneau exposable (filtre les events inexploitables). ─
+  // ⚠️ Depuis le passage du cours PARTICULIER en créneau LIBRE (2026-06-19), ce
+  // endpoint n'expose QUE les créneaux COLLECTIFS. Les events « Cours
+  // particulier — <client> » créés par les réservations libres NE doivent PAS
+  // réapparaître ici comme créneaux réservables (ils sont déjà réservés !). Le
+  // particulier passe par /api/creneaux/particulier (slots générés 9h-21h).
   const creneaux: Creneau[] = [];
   for (const event of events) {
     const inscrits = event.id ? (inscritsParCreneau.get(event.id) ?? 0) : 0;
     const creneau = eventVersCreneau(event, inscrits);
     if (!creneau) continue;
+    if (creneau.type !== "collectif") continue; // particulier = créneau libre
     creneaux.push(creneau);
     // Lieu manquant : on garde le créneau (cf. choix documenté en tête de
     // fichier) mais on le signale dans les logs pour qu'Alice complète l'event.

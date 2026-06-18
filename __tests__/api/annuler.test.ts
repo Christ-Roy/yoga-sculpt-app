@@ -36,9 +36,16 @@ vi.mock("@/lib/supabase/service", () => ({
 
 const getEventMock = vi.fn();
 const patchEventMock = vi.fn();
+const deleteEventMock = vi.fn();
 vi.mock("@/lib/google-calendar", () => ({
   getEvent: (...args: unknown[]) => getEventMock(...args),
   patchEvent: (...args: unknown[]) => patchEventMock(...args),
+  deleteEvent: (...args: unknown[]) => deleteEventMock(...args),
+}));
+
+const notifierAliceMock = vi.fn();
+vi.mock("@/lib/notify-alice", () => ({
+  notifierAlice: (...args: unknown[]) => notifierAliceMock(...args),
 }));
 
 const USER = { id: "user-1", email: "cliente@example.com", user_metadata: {} };
@@ -76,6 +83,8 @@ beforeEach(() => {
   serviceMock = makeSupabaseMock(USER);
   getEventMock.mockResolvedValue({ id: "evt-1", attendees: [] });
   patchEventMock.mockResolvedValue(undefined);
+  deleteEventMock.mockResolvedValue(undefined);
+  notifierAliceMock.mockResolvedValue(true);
 });
 
 describe("POST /api/annuler", () => {
@@ -171,8 +180,81 @@ describe("POST /api/annuler", () => {
     );
     expect(ticketUpdate?.payload).toEqual({ quantite_restante: 10 });
 
-    // Retrait de l'attendee Google tenté (best-effort).
+    // Collectif → retrait de l'attendee Google (patch), PAS de delete.
     expect(patchEventMock).toHaveBeenCalledTimes(1);
+    expect(deleteEventMock).not.toHaveBeenCalled();
+
+    // Alice notifiée de l'annulation (best-effort).
+    expect(notifierAliceMock).toHaveBeenCalledWith(
+      "annulation",
+      expect.objectContaining({ type: "collectif" }),
+    );
+  });
+
+  it("particulier : SUPPRIME l'event Google dédié (pas de patch attendee)", async () => {
+    serviceMock.queueResult("bookings", "select", {
+      data: booking(48, {
+        type: "particulier",
+        google_event_id: "google-evt-part",
+        google_calendar_creneau_id: null,
+      }),
+      error: null,
+    });
+    serviceMock.queueResult("bookings", "update", {
+      data: { id: "booking-1" },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "select", {
+      data: {
+        id: "ticket-1",
+        user_id: USER.id,
+        type: "particulier",
+        quantite_initiale: 2,
+        quantite_restante: 1,
+        stripe_payment_id: null,
+        stripe_session_id: null,
+        expires_at: null,
+        created_at: "2026-06-01T00:00:00.000Z",
+      },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: null, error: null });
+
+    const { POST } = await import("@/app/api/annuler/route");
+    const res = asMockResponse(await POST(makeReq({ bookingId: "booking-1" })));
+
+    expect(res.status).toBe(200);
+    // Event particulier dédié → DELETE (pas de patch attendee).
+    expect(deleteEventMock).toHaveBeenCalledWith("google-evt-part");
+    expect(patchEventMock).not.toHaveBeenCalled();
+    expect(notifierAliceMock).toHaveBeenCalledWith(
+      "annulation",
+      expect.objectContaining({ type: "particulier" }),
+    );
+  });
+
+  it("ignore l'event Google si le booking porte un placeholder pending-", async () => {
+    serviceMock.queueResult("bookings", "select", {
+      data: booking(48, {
+        type: "particulier",
+        google_event_id: "pending-user-1-xyz",
+        google_calendar_creneau_id: null,
+      }),
+      error: null,
+    });
+    serviceMock.queueResult("bookings", "update", {
+      data: { id: "booking-1" },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "select", { data: null, error: null });
+
+    const { POST } = await import("@/app/api/annuler/route");
+    const res = asMockResponse(await POST(makeReq({ bookingId: "booking-1" })));
+
+    expect(res.status).toBe(200);
+    // Aucun appel Google (placeholder = event jamais créé).
+    expect(deleteEventMock).not.toHaveBeenCalled();
+    expect(patchEventMock).not.toHaveBeenCalled();
   });
 
   it("plafonne le recrédit à quantite_initiale (pas de dépassement)", async () => {
