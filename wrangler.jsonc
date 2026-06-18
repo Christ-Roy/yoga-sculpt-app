@@ -28,8 +28,7 @@
   //      GOOGLE_CALENDAR_SA_KEY, GOOGLE_CALENDAR_ID,
   //      BREVO_API_KEY,
   //      STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-  //      STRIPE_PRICE_COLLECTIF, STRIPE_PRICE_PARTICULIER, STRIPE_PRICE_CARTE10,
-  //      CALCOM_API_KEY, CALCOM_WEBHOOK_SECRET.
+  //      STRIPE_PRICE_COLLECTIF, STRIPE_PRICE_PARTICULIER, STRIPE_PRICE_CARTE10.
   // ==========================================================================
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yoga-sculpt-app",
@@ -68,9 +67,7 @@
     "NEXT_PUBLIC_SUPABASE_URL": "https://esearpxflfgreejjxlfg.supabase.co",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzZWFycHhmbGZncmVlamp4bGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjg5MjQsImV4cCI6MjA5NzMwNDkyNH0.98vPb7DBZ_8peL-66IlfBEa70FxUm58lm0-nKcP8Bw0",
     "NEXT_PUBLIC_APP_URL": "https://app.yoga-sculpt.fr",
-    "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
-    "CALCOM_USERNAME": "alice-cbmnu0",
-    "CALCOM_EVENT_SLUG": "yoga-sculpt"
+    "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr"
   },
   // ===========================================================================
   // ENVIRONNEMENTS NOMMÉS
@@ -93,9 +90,7 @@
         "NEXT_PUBLIC_SUPABASE_URL": "https://esearpxflfgreejjxlfg.supabase.co",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzZWFycHhmbGZncmVlamp4bGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjg5MjQsImV4cCI6MjA5NzMwNDkyNH0.98vPb7DBZ_8peL-66IlfBEa70FxUm58lm0-nKcP8Bw0",
         "NEXT_PUBLIC_APP_URL": "https://app.yoga-sculpt.fr",
-        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
-        "CALCOM_USERNAME": "alice-cbmnu0",
-        "CALCOM_EVENT_SLUG": "yoga-sculpt"
+        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr"
       }
     },
     // -------------------------------------------------------------------------
@@ -127,9 +122,7 @@
         "NEXT_PUBLIC_SUPABASE_URL": "https://htgbtckgkulwuyzfsvjq.supabase.co",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY": "STAGING_ANON_KEY_PLACEHOLDER",
         "NEXT_PUBLIC_APP_URL": "https://yoga-sculpt-app-staging.workers.dev",
-        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr",
-        "CALCOM_USERNAME": "alice-cbmnu0",
-        "CALCOM_EVENT_SLUG": "yoga-sculpt"
+        "NEXT_PUBLIC_SITE_URL": "https://yoga-sculpt.fr"
       }
     }
   }
