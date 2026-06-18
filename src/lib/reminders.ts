@@ -31,6 +31,12 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendTransactionalEmail } from "@/lib/brevo";
+import {
+  renderEmail,
+  textFromBlocks,
+  escapeHtml,
+  COULEURS,
+} from "@/lib/email-templates";
 import type { TicketType } from "@/lib/db-types";
 
 // ============================================================================
@@ -111,81 +117,56 @@ function sujetRappel(kind: KindRappel): string {
     : "C'est dans 2h ! On vous attend — Yoga Sculpt";
 }
 
-/**
- * Coque HTML commune (charte NOIR & OR, titres Anton via Google Fonts).
- * Inline styles : obligatoire en email (pas de <style> fiable selon les clients).
- */
-function coqueHtml(titre: string, corps: string): string {
-  const ink = "#0E0E0E";
-  const gold = "#D4AD6A";
-  const paper = "#F2F0EC";
-  const border = "#2A2A2A";
-  return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${titre}</title>
-</head>
-<body style="margin:0;padding:0;background:${ink};color:${paper};font-family:'Inter',Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${ink};">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#141414;border:1px solid ${border};border-radius:4px;">
-        <!-- En-tête / monogramme -->
-        <tr><td align="center" style="padding:28px 32px 8px;">
-          <div style="font-family:'Anton','Arial Narrow',sans-serif;font-size:28px;letter-spacing:2px;color:${gold};text-transform:uppercase;">YOGA&nbsp;SCULPT</div>
-        </td></tr>
-        <!-- Titre -->
-        <tr><td style="padding:8px 32px 0;">
-          <h1 style="margin:0;font-family:'Anton','Arial Narrow',sans-serif;font-weight:400;font-size:24px;line-height:1.2;color:${paper};text-transform:uppercase;letter-spacing:1px;">${titre}</h1>
-        </td></tr>
-        <!-- Corps -->
-        <tr><td style="padding:16px 32px 28px;font-size:15px;line-height:1.6;color:${paper};">
-          ${corps}
-        </td></tr>
-        <!-- Pied -->
-        <tr><td style="padding:20px 32px;border-top:1px solid ${border};font-size:12px;line-height:1.6;color:#8A8A8A;">
-          Yoga Sculpt — Lyon<br>
-          Vous recevez cet email car vous avez réservé un cours sur votre espace client.<br>
-          Pour gérer vos réservations : <a href="${APP_URL}/espace/reservations" style="color:${gold};text-decoration:underline;">votre espace client</a>.
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
+/** URL de la page « mes réservations » (CTA + footer). */
+const URL_RESERVATIONS = `${APP_URL}/espace/reservations`;
+
+/** Salutation personnalisée (texte brut) si le prénom est connu. */
+function salutation(prenom: string | null): string {
+  return prenom ? `Bonjour ${prenom},` : "Bonjour,";
 }
 
-/** Bloc HTML « carte » récapitulant le cours (date/heure/type/lieu). */
+/** Salutation pour le HTML : prénom échappé (provient du profil utilisateur). */
+function salutationHtml(prenom: string | null): string {
+  return prenom ? `Bonjour ${escapeHtml(prenom)},` : "Bonjour,";
+}
+
+/**
+ * Bloc HTML « carte » récapitulant le cours (type / date / heure / lieu).
+ * Styles inline, palette factorisée. Le prénom n'apparaît pas ici → pas de
+ * valeur dynamique non maîtrisée à échapper (type, dates et lieu sont
+ * contrôlés en interne).
+ */
 function carteCoursHtml(ctx: ContexteRappel): string {
-  const gold = "#D4AD6A";
-  const border = "#2A2A2A";
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;border:1px solid ${border};border-radius:4px;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;border:1px solid ${COULEURS.border};border-radius:4px;background:${COULEURS.ink};">
     <tr><td style="padding:16px 18px;">
-      <div style="font-family:'Anton','Arial Narrow',sans-serif;font-size:18px;color:${gold};text-transform:uppercase;letter-spacing:1px;">${libelleType(ctx.type)}</div>
-      <div style="margin-top:8px;font-size:16px;color:#F2F0EC;"><strong>${dateLongueFr(ctx.startsAt)}</strong></div>
-      <div style="margin-top:2px;font-size:15px;color:#F2F0EC;">${heureFr(ctx.startsAt)} — ${heureFr(ctx.endsAt)}</div>
-      <div style="margin-top:8px;font-size:14px;color:#8A8A8A;">Lyon</div>
+      <div style="font-family:'Anton','Arial Narrow',Helvetica,Arial,sans-serif;font-size:18px;color:${COULEURS.gold};text-transform:uppercase;letter-spacing:1px;">${libelleType(ctx.type)}</div>
+      <div style="margin-top:8px;font-size:16px;color:${COULEURS.paper};"><strong>${dateLongueFr(ctx.startsAt)}</strong></div>
+      <div style="margin-top:2px;font-size:15px;color:${COULEURS.paper};">${heureFr(ctx.startsAt)} — ${heureFr(ctx.endsAt)}</div>
+      <div style="margin-top:8px;font-size:14px;color:${COULEURS.muted};">Lyon</div>
     </td></tr>
   </table>`;
 }
 
-/** Construit le HTML + texte d'un rappel J-1. */
+/** Construit le HTML + texte d'un rappel J-1, via le layout factorisé. */
 function templateJ1(ctx: ContexteRappel): { html: string; text: string } {
-  const salut = ctx.prenom ? `Bonjour ${ctx.prenom},` : "Bonjour,";
-  const corps = `
-    <p style="margin:0 0 12px;">${salut}</p>
+  const salut = salutation(ctx.prenom);
+  const corpsHtml = `
+    <p style="margin:0 0 12px;">${salutationHtml(ctx.prenom)}</p>
     <p style="margin:0 0 4px;">Petit rappel : vous avez un cours <strong>demain</strong>.</p>
     ${carteCoursHtml(ctx)}
-    <p style="margin:0 0 12px;">Pensez à prévoir une tenue confortable et une bouteille d'eau.</p>
-    <p style="margin:16px 0 0;">
-      <a href="${APP_URL}/espace/reservations" style="display:inline-block;background:#D4AD6A;color:#0E0E0E;font-family:'Anton','Arial Narrow',sans-serif;font-size:14px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;padding:12px 22px;border-radius:3px;">Voir ma réservation</a>
-    </p>
-    <p style="margin:16px 0 0;font-size:13px;color:#8A8A8A;">À demain !</p>
+    <p style="margin:0 0 4px;">Pensez à prévoir une tenue confortable et une bouteille d'eau.</p>
+    <p style="margin:16px 0 0;font-size:13px;color:${COULEURS.muted};">À demain !</p>
   `;
-  const html = coqueHtml("Votre cours de demain", corps);
+  const { html } = renderEmail({
+    preheader: "Votre cours de Yoga Sculpt, c'est demain.",
+    titre: "Votre cours de demain",
+    corpsHtml,
+    cta: { label: "Voir ma réservation", url: URL_RESERVATIONS },
+    footerNote:
+      "Vous recevez cet email car vous avez réservé un cours sur votre espace client.",
+  });
 
-  const text = [
+  const text = textFromBlocks([
     salut,
     "",
     "Petit rappel : vous avez un cours demain.",
@@ -197,32 +178,36 @@ function templateJ1(ctx: ContexteRappel): { html: string; text: string } {
     "",
     "Pensez à prévoir une tenue confortable et une bouteille d'eau.",
     "",
-    `Voir ma réservation : ${APP_URL}/espace/reservations`,
+    `Voir ma réservation : ${URL_RESERVATIONS}`,
     "",
     "À demain !",
     "",
     "—",
     "Yoga Sculpt — Lyon",
     "Vous recevez cet email car vous avez réservé un cours sur votre espace client.",
-  ].join("\n");
+  ]);
 
   return { html, text };
 }
 
-/** Construit le HTML + texte d'un rappel H-2. */
+/** Construit le HTML + texte d'un rappel H-2, via le layout factorisé. */
 function templateH2(ctx: ContexteRappel): { html: string; text: string } {
-  const salut = ctx.prenom ? `Bonjour ${ctx.prenom},` : "Bonjour,";
-  const corps = `
-    <p style="margin:0 0 12px;">${salut}</p>
+  const salut = salutation(ctx.prenom);
+  const corpsHtml = `
+    <p style="margin:0 0 12px;">${salutationHtml(ctx.prenom)}</p>
     <p style="margin:0 0 4px;">C'est bientôt l'heure — votre cours commence <strong>dans 2 heures</strong>. On vous attend !</p>
     ${carteCoursHtml(ctx)}
-    <p style="margin:16px 0 0;">
-      <a href="${APP_URL}/espace/reservations" style="display:inline-block;background:#D4AD6A;color:#0E0E0E;font-family:'Anton','Arial Narrow',sans-serif;font-size:14px;letter-spacing:1px;text-transform:uppercase;text-decoration:none;padding:12px 22px;border-radius:3px;">Voir ma réservation</a>
-    </p>
   `;
-  const html = coqueHtml("C'est dans 2h !", corps);
+  const { html } = renderEmail({
+    preheader: "C'est dans 2h ! On vous attend.",
+    titre: "C'est dans 2h !",
+    corpsHtml,
+    cta: { label: "Voir ma réservation", url: URL_RESERVATIONS },
+    footerNote:
+      "Vous recevez cet email car vous avez réservé un cours sur votre espace client.",
+  });
 
-  const text = [
+  const text = textFromBlocks([
     salut,
     "",
     "C'est bientôt l'heure — votre cours commence dans 2 heures. On vous attend !",
@@ -232,11 +217,11 @@ function templateH2(ctx: ContexteRappel): { html: string; text: string } {
     `${heureFr(ctx.startsAt)} — ${heureFr(ctx.endsAt)}`,
     "Lieu : Lyon",
     "",
-    `Voir ma réservation : ${APP_URL}/espace/reservations`,
+    `Voir ma réservation : ${URL_RESERVATIONS}`,
     "",
     "—",
     "Yoga Sculpt — Lyon",
-  ].join("\n");
+  ]);
 
   return { html, text };
 }
