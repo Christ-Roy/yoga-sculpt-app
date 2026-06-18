@@ -597,10 +597,9 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean;
 }) {
-  // Largeur aléatoire stable (entre 50% et 90%) pour un rendu naturel.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`;
-  }, []);
+  // Largeur fixe : Math.random() pendant le render est impur (non-déterministe
+  // SSR, interdit par react-hooks). Une largeur constante suffit pour un skeleton.
+  const width = "70%";
 
   return (
     <div

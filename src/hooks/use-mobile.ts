@@ -3,23 +3,23 @@ import * as React from "react";
 const MOBILE_BREAKPOINT = 768;
 
 /**
- * Hook shadcn standard : true quand la largeur de viewport < 768px.
+ * Hook : true quand la largeur de viewport < 768px.
  * Utilisé par la Sidebar pour basculer en mode drawer (Sheet) sur mobile.
+ *
+ * Implémenté avec `useSyncExternalStore` (plutôt que useState+useEffect) :
+ * c'est l'outil React idoine pour s'abonner à un store externe comme
+ * `matchMedia`, sans setState synchrone dans un effect (cascading renders).
+ * Le snapshot serveur renvoie `false` (pas de window au SSR) → pas de mismatch.
  */
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(
-    undefined,
-  );
-
-  React.useEffect(() => {
+  const subscribe = React.useCallback((onChange: () => void) => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
     mql.addEventListener("change", onChange);
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
-  return !!isMobile;
+  const getSnapshot = () => window.innerWidth < MOBILE_BREAKPOINT;
+  const getServerSnapshot = () => false;
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
