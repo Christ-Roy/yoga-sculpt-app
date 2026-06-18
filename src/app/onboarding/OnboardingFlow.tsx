@@ -5,10 +5,16 @@ import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/Button";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
-import type { BookingPrefill } from "@/lib/booking";
 import { saveOnboarding } from "./actions";
 
 type Answers = Record<string, string>;
+
+/** Infos de profil transmises à l'écran de fin d'onboarding (pré-remplissage). */
+type BookingPrefill = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
 
 export function OnboardingFlow({
   firstName,
