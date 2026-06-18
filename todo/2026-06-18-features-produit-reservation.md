@@ -31,9 +31,18 @@ Réutiliser le compte Brevo Veridian (skill `brevo`). Templates transactionnels.
 - **Rappel H-2** : version courte "C'est dans 2h ! On vous attend." + lieu + lien itinéraire.
 - Version texte + HTML, désinscription, expéditeur `contact@yoga-sculpt.fr`.
 
-**Déclenchement** : cron (via `~/all-cron/`, app `yoga-sculpt/`) qui scanne les `bookings confirmed`
-à T-24h et T-2h et envoie via Brevo. Idempotent (colonne `reminder_j1_sent_at` / `reminder_h2_sent_at`
-sur `bookings` → migration additive). NE PAS double-envoyer.
+**Déclenchement : Cloudflare Cron Trigger (100% CF, GRATUIT, self-contained — décision Robert 2026-06-18).**
+Pas de cron externe (machine locale = point de défaillance, refusé). Pas de Durable Object (exige le plan
+Workers Paid 5 $/mois — refusé, on reste gratuit). Le Cron Trigger est inclus sur le plan Workers free
+(jusqu'à 5 crons/compte, 0 €).
+- `wrangler.jsonc` : `"triggers": { "crons": ["*/15 * * * *"] }` (toutes les 15 min ; le grain 15 min est
+  suffisant pour des rappels J-1/H-2, pas besoin d'être à la seconde).
+- Handler `scheduled` (côté Worker, via OpenNext — vérifier la cohabitation handler `scheduled` + `fetch` de
+  Next ; fallback si plomberie OpenNext pénible = petit Worker cron SÉPARÉ, toujours 100% CF/gratuit, qui tape
+  l'API Supabase + Brevo). Le handler scanne les `bookings confirmed` à fenêtre T-24h (±15min) et T-2h (±15min),
+  envoie via Brevo, et **marque** la colonne d'idempotence.
+- Idempotent : colonnes `reminder_j1_sent_at` / `reminder_h2_sent_at` sur `bookings` → NE PAS double-envoyer
+  même si le cron repasse.
 - ⚠️ Migration additive `0003_reminders.sql` : `alter table bookings add column reminder_j1_sent_at timestamptz, add column reminder_h2_sent_at timestamptz;`
 
 ---
