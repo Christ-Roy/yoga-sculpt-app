@@ -12,7 +12,7 @@
  * │   ✅ Uniquement Web Crypto (`crypto.subtle`) + `fetch`, dispos nativement │
  * │      sur Workers.                                                         │
  * │                                                                           │
- * │   Même approche que `src/app/api/webhooks/cal/route.ts` (HMAC SHA-256     │
+ * │   Même approche que `src/app/api/webhooks/stripe/route.ts` (HMAC SHA-256  │
  * │   fait main avec `crypto.subtle`) — ici on signe en RS256 pour le JWT.    │
  * └─────────────────────────────────────────────────────────────────────────┘
  *
