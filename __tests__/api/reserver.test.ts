@@ -168,7 +168,7 @@ describe("POST /api/reserver", () => {
   it("renvoie 409 + rollback du booking si la course sur le décrément est perdue", async () => {
     serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
     serviceMock.queueResult("bookings", "insert", {
-      data: { id: "booking-2", ...TICKET, status: "confirmed" },
+      data: { ...TICKET, id: "booking-2", status: "confirmed" },
       error: null,
     });
     // Décrément → 0 ligne touchée (maybeSingle renvoie null) = ticket vidé entre-temps.
