@@ -207,3 +207,11 @@ describe("POST /api/annuler", () => {
     expect(ticketUpdate?.payload).toEqual({ quantite_restante: 10 });
   });
 });
+
+describe("GET /api/annuler", () => {
+  it("renvoie 405 (méthode non autorisée)", async () => {
+    const { GET } = await import("@/app/api/annuler/route");
+    const res = asMockResponse(GET());
+    expect(res.status).toBe(405);
+  });
+});

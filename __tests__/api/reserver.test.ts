@@ -187,3 +187,11 @@ describe("POST /api/reserver", () => {
     expect(patchEventMock).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/reserver", () => {
+  it("renvoie 405 (méthode non autorisée)", async () => {
+    const { GET } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(GET());
+    expect(res.status).toBe(405);
+  });
+});

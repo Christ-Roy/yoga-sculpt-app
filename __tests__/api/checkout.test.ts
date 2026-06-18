@@ -135,3 +135,11 @@ describe("POST /api/checkout", () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe("GET /api/checkout", () => {
+  it("renvoie 405 (méthode non autorisée)", async () => {
+    const { GET } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(GET());
+    expect(res.status).toBe(405);
+  });
+});

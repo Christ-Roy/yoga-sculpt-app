@@ -183,3 +183,11 @@ describe("POST /api/webhooks/stripe", () => {
     expect(serviceMock.calls.find((c) => c.op === "upsert")).toBeUndefined();
   });
 });
+
+describe("GET /api/webhooks/stripe", () => {
+  it("renvoie 405 (méthode non autorisée)", async () => {
+    const { GET } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(GET());
+    expect(res.status).toBe(405);
+  });
+});
