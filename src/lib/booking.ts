@@ -6,11 +6,14 @@
  */
 
 const CAL_USERNAME = process.env.CALCOM_USERNAME || "alice-cbmnu0";
-const CAL_EVENT = process.env.CALCOM_EVENT_SLUG || "yoga-sculpt";
+// 2 events Cal existent : `cours-particulier` (60€, créneaux réservables) et
+// `cours-collectif` (20€, dates pas encore fixées par Alice). Défaut = particulier
+// (réservable tout de suite). L'ancien slug `yoga-sculpt` n'existe plus (404).
+const CAL_EVENT = process.env.CALCOM_EVENT_SLUG || "cours-particulier";
 
 /**
  * Identifiant du lien Cal (`username/event-slug`) attendu par l'embed Cal.com
- * (`calLink="alice-cbmnu0/yoga-sculpt"`).
+ * (`calLink="alice-cbmnu0/cours-particulier"`).
  */
 export const CALCOM_LINK = `${CAL_USERNAME}/${CAL_EVENT}`;
 
@@ -27,7 +30,7 @@ export type BookingPrefill = {
 /**
  * Construit la config de pré-remplissage de l'embed Cal.com à partir du profil.
  *
- * Mapping vérifié en réel (juin 2026) sur `alice-cbmnu0/yoga-sculpt` :
+ * Mapping vérifié en réel (juin 2026) sur `alice-cbmnu0/cours-particulier` :
  *   - `name`  → champ "Nom complet"  (pré-remplissage OK)
  *   - `email` → champ "Email"        (pré-remplissage OK)
  *   - `attendeePhoneNumber` → champ téléphone (slug standard Cal). Le champ
