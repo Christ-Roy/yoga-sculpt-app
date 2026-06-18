@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppSidebar } from "@/components/AppSidebar";
 import { SidebarTopbar } from "@/components/SidebarTopbar";
+import { FingerprintCollector } from "@/components/FingerprintCollector";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 /**
@@ -50,6 +51,8 @@ export default async function EspaceLayout({
         <SidebarTopbar />
         {children}
       </SidebarInset>
+      {/* Collecte anti-abus du parrainage (silencieuse, best-effort, 1×/session). */}
+      <FingerprintCollector />
     </SidebarProvider>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarPlus, Home, LogOut, Ticket } from "lucide-react";
+import { CalendarPlus, Gift, Home, LogOut, Ticket } from "lucide-react";
 import { useTransition } from "react";
 
 import { Logo } from "@/components/Logo";
@@ -26,6 +26,7 @@ const LIENS = [
   { href: "/espace", label: "Mon espace", icon: Home },
   { href: "/espace/reserver", label: "Réserver", icon: CalendarPlus },
   { href: "/espace/reservations", label: "Mes réservations", icon: Ticket },
+  { href: "/espace/parrainer", label: "Parrainer", icon: Gift },
 ] as const;
 
 /**
