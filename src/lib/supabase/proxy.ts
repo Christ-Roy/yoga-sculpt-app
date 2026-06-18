@@ -42,8 +42,14 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // `/admin` est inclus : défense en profondeur (la garde serveur
+  // `requireAdmin()` reste la vraie barrière — un non-admin connecté est
+  // redirigé vers /espace par la page elle-même ; le middleware évite juste
+  // à un visiteur non connecté d'atteindre la page admin).
   const isProtected =
-    pathname.startsWith("/espace") || pathname.startsWith("/onboarding");
+    pathname.startsWith("/espace") ||
+    pathname.startsWith("/onboarding") ||
+    pathname.startsWith("/admin");
   const isAuthPage = pathname === "/login";
 
   // Not logged in + trying to reach a protected route → /login
