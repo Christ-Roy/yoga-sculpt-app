@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { logEvent } from "@/lib/events";
 
 /**
  * Webhook Stripe — réception des événements de paiement.
@@ -42,6 +43,8 @@ interface StripeCheckoutSession {
   client_reference_id?: string | null;
   payment_intent?: string | null;
   payment_status?: string;
+  /** Montant total payé, en CENTIMES (devise mineure) — pour la LTV / le CA. */
+  amount_total?: number | null;
   metadata?: {
     user_id?: string;
     type?: string;
@@ -193,6 +196,38 @@ async function crediterTickets(session: StripeCheckoutSession): Promise<void> {
   console.info(
     `[webhook:stripe] Tickets crédités — user=${userId} type=${type} ` +
       `quantite=${quantite} session=${session.id}`,
+  );
+
+  // ── Tracking : checkout_completed + ticket_acquired (acquisition: paid). ────
+  // best-effort (le crédit ticket — métier — a déjà réussi ; un log raté n'a pas
+  // à le faire échouer ni rejouer). On réutilise le client service_role déjà
+  // ouvert. montant en euros (amount_total Stripe = centimes) pour LTV/CA.
+  const montant =
+    typeof session.amount_total === "number" ? session.amount_total / 100 : null;
+
+  await logEvent(
+    userId,
+    "checkout_completed",
+    {
+      stripe_session_id: session.id,
+      type,
+      quantite,
+      nb_tickets: quantite,
+      montant,
+    },
+    { source: "webhook:stripe", service: supabase },
+  );
+
+  await logEvent(
+    userId,
+    "ticket_acquired",
+    {
+      type,
+      quantite,
+      acquisition_source: "paid",
+      stripe_session_id: session.id,
+    },
+    { source: "webhook:stripe", service: supabase },
   );
 }
 

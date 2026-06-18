@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { scanAndSendReminders } from "@/lib/reminders";
+import { markPastBookingsAttended } from "@/lib/attendance";
 
 /**
  * GET /api/cron — déclencheur des rappels mail automatiques (J-1 / H-2).
@@ -83,8 +84,23 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Deux passes indépendantes au même tick :
+    //   1. Rappels mail J-1 / H-2 (existant).
+    //   2. Émission des events booking_attended pour les séances passées
+    //      (tracking timeline ; le compteur de séances reste dérivé de bookings).
+    // La passe attendance est best-effort et ne doit pas faire échouer les
+    // rappels (ni l'inverse) : on l'isole dans son propre try/catch.
     const resultat = await scanAndSendReminders();
-    return NextResponse.json({ ok: true, ...resultat });
+
+    let attendance;
+    try {
+      attendance = await markPastBookingsAttended();
+    } catch (attErr) {
+      console.error("[cron] Passe attendance échouée (rappels OK) :", attErr);
+      attendance = { marquees: 0, erreurs: 1 };
+    }
+
+    return NextResponse.json({ ok: true, ...resultat, attendance });
   } catch (err) {
     // scanAndSendReminders agrège déjà les erreurs d'envoi ; un throw ici =
     // défaillance plus profonde (client Supabase indisponible, etc.).

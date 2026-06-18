@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/events";
 
 /**
  * Création d'une session de paiement Stripe pour un « carnet de tickets ».
@@ -221,7 +222,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const session = (await stripeResponse.json()) as { url?: string };
+  const session = (await stripeResponse.json()) as {
+    url?: string;
+    id?: string;
+    amount_total?: number | null;
+  };
   if (!session.url) {
     console.error("[checkout] Réponse Stripe sans `url` :", session);
     return NextResponse.json(
@@ -229,6 +234,27 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+
+  // ── Tracking : checkout_started. ───────────────────────────────────────────
+  // best-effort (ne bloque jamais la redirection vers le paiement). On trace le
+  // stripe_session_id pour la dérivation des abandons (vue v_user_checkout_abandons)
+  // et le couple formule/type/quantité pour le pilotage. amount_total est en
+  // CENTIMES côté Stripe → on convertit en euros (montant) si présent.
+  void logEvent(
+    user.id,
+    "checkout_started",
+    {
+      stripe_session_id: session.id ?? null,
+      formule: parsed.formule ?? null,
+      type: config.type,
+      quantite: config.quantite,
+      montant:
+        typeof session.amount_total === "number"
+          ? session.amount_total / 100
+          : null,
+    },
+    { source: "checkout" },
+  );
 
   return NextResponse.json({ url: session.url });
 }

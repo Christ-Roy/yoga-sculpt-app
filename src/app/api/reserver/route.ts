@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEvent, patchEvent } from "@/lib/google-calendar";
+import { logEvent } from "@/lib/events";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
   bornEventToIso,
@@ -265,6 +266,22 @@ export async function POST(request: Request) {
       err,
     );
   }
+
+  // ── Tracking : booking_created. ─────────────────────────────────────────────
+  // best-effort (la résa — métier — est déjà confirmée en base, étape 3/4). On
+  // réutilise le client service_role déjà ouvert.
+  await logEvent(
+    user.id,
+    "booking_created",
+    {
+      booking_id: booking.id,
+      type,
+      creneau_id: creneauId,
+      starts_at: startsAt,
+      ticket_id: ticket.id,
+    },
+    { source: "reserver", service },
+  );
 
   return NextResponse.json({ ok: true, booking });
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEvent, patchEvent } from "@/lib/google-calendar";
+import { logEvent } from "@/lib/events";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
   retirerAttendee,
@@ -159,6 +160,7 @@ export async function POST(request: Request) {
   // ── 5) Recrédite le ticket lié (best-effort). ───────────────────────────────
   // On lit la quantité actuelle puis +1, sous le plafond quantite_initiale (le
   // check DB `quantite_restante <= quantite_initiale` rejetterait un dépassement).
+  let ticketRecredite = false;
   if (booking.ticket_id) {
     const { data: ticketRow, error: ticketLoadErr } = await service
       .from("tickets")
@@ -183,6 +185,8 @@ export async function POST(request: Request) {
         .eq("id", ticket.id);
       if (recreditErr) {
         console.error("[annuler] Recrédit ticket échoué :", recreditErr.message);
+      } else {
+        ticketRecredite = true;
       }
     }
   }
@@ -204,6 +208,22 @@ export async function POST(request: Request) {
       );
     }
   }
+
+  // ── Tracking : booking_cancelled. ───────────────────────────────────────────
+  // best-effort (l'annulation — métier — est déjà committée, étape 4). On
+  // réutilise le client service_role déjà ouvert.
+  await logEvent(
+    user.id,
+    "booking_cancelled",
+    {
+      booking_id: booking.id,
+      type: booking.type,
+      creneau_id: booking.google_calendar_creneau_id,
+      starts_at: booking.starts_at,
+      recredite: ticketRecredite,
+    },
+    { source: "annuler", service },
+  );
 
   return NextResponse.json({ ok: true });
 }
