@@ -18,6 +18,16 @@
     "enabled": true
   },
   // ---------------------------------------------------------------------------
+  // Cron Triggers — rappels mail automatiques J-1 / H-2 (cf. src/lib/reminders.ts).
+  // Tick toutes les 15 min : la fenêtre de scan (±15 min autour de T-24h / T-2h)
+  // est calée sur cette cadence pour qu'aucune résa ne soit ratée ni doublée.
+  // Le tick déclenche la route protégée GET /api/cron (secret CRON_SECRET) —
+  // voir l'en-tête de src/app/api/cron/route.ts pour le branchement déclencheur.
+  // ---------------------------------------------------------------------------
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  // ---------------------------------------------------------------------------
   // Variables PUBLIQUES (non sensibles) disponibles au runtime du Worker.
   // L'app lit toute config Supabase côté serveur (Server Components / Actions /
   // route handlers / edge middleware) via process.env → ces valeurs doivent
