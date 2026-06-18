@@ -11,6 +11,7 @@ import {
 } from "@/lib/reservation";
 import type { SeanceAgenda } from "@/lib/calendar-export";
 import { AddToCalendar } from "@/components/AddToCalendar";
+import { LieuMaps } from "@/components/LieuMaps";
 import { Toast, type ToastVariant } from "@/components/Toast";
 
 /**
@@ -39,6 +40,15 @@ export interface BookingAffichage {
   ends_at: string;
   /** Titre éventuel (summary Google), sinon dérivé du type côté UI. */
   titre?: string | null;
+  /**
+   * Lieu du cours (champ « Lieu » de l'event Google). Le booking ne le stocke
+   * pas en base : la page peut le passer si elle l'enrichit depuis Google,
+   * sinon il reste absent et on ne l'affiche tout simplement pas ici (pas de
+   * « Lieu à confirmer » trompeur — la donnée n'est pas chargée, ce n'est pas
+   * une absence de saisie). Le .ics téléchargé, lui, est enrichi côté route
+   * `/api/ics` qui relit l'event Google.
+   */
+  lieu?: string | null;
 }
 
 function bookingVersSeance(b: BookingAffichage): SeanceAgenda {
@@ -47,7 +57,9 @@ function bookingVersSeance(b: BookingAffichage): SeanceAgenda {
     titre: b.titre?.trim() || `${libelleType(b.type)} — Yoga Sculpt`,
     starts_at: b.starts_at,
     ends_at: b.ends_at,
-    lieu: "Lyon", // placeholder tant qu'Alice n'a pas confirmé l'adresse
+    // Lieu réel s'il a été enrichi par la page ; sinon absent (la route
+    // `/api/ics` réinjecte le vrai lieu depuis Google au téléchargement).
+    lieu: b.lieu?.trim() || undefined,
     description: "Séance Yoga Sculpt avec Alice Gaudry.",
   };
 }
@@ -147,6 +159,13 @@ export function MesReservations({
                   <p className="text-sm text-text-secondary">
                     {formaterPlageFr(b.starts_at, b.ends_at)}
                   </p>
+                  {/* Lieu cliquable (Google Maps) — affiché seulement s'il est
+                      renseigné (le booking ne stocke pas le lieu en base). */}
+                  {b.lieu?.trim() && (
+                    <div className="mt-1.5">
+                      <LieuMaps lieu={b.lieu} />
+                    </div>
+                  )}
                 </div>
 
                 <div className="shrink-0">

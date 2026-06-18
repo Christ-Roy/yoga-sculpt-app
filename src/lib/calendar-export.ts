@@ -29,8 +29,10 @@ export interface SeanceAgenda {
   /** Fin (ISO 8601). */
   ends_at: string;
   /**
-   * Lieu. Placeholder "Lyon" tant qu'Alice n'a pas confirmé l'adresse exacte
-   * (NE PAS inventer d'adresse précise — cf. CLAUDE.md du projet).
+   * Lieu du cours, repris du champ « Lieu » (`location`) de l'event Google
+   * Calendar d'Alice. Absent si elle ne l'a pas saisi — dans ce cas on n'écrit
+   * NI `LOCATION` dans le .ics NI `location` dans l'URL Google Agenda (on
+   * n'invente AUCUNE adresse — cf. CLAUDE.md du projet).
    */
   lieu?: string;
   /** Description courte (optionnelle). */

@@ -43,10 +43,14 @@ const EVENTS = [
     id: "evt-collectif",
     status: "confirmed",
     summary: "Cours collectif — Yoga Sculpt",
+    // Lieu renseigné côté Google → doit être exposé tel quel dans `creneau.lieu`.
+    location: "Studio Bellecour, 69002 Lyon",
     start: { dateTime: "2026-07-01T17:00:00.000Z" },
     end: { dateTime: "2026-07-01T18:00:00.000Z" },
   },
   {
+    // Lieu NON renseigné (champ « Lieu » oublié par Alice) → `lieu` undefined,
+    // le créneau reste exposé (l'UI affichera « Lieu à confirmer »).
     id: "evt-particulier",
     status: "confirmed",
     summary: "Cours particulier — Yoga Sculpt",
@@ -103,6 +107,23 @@ describe("GET /api/creneaux", () => {
     const particulier = creneaux.find((c) => c.id === "evt-particulier");
     expect(particulier?.type).toBe("particulier");
     expect(particulier?.inscrits).toBe(0);
+  });
+
+  it("expose le lieu (location Google) quand il est renseigné, undefined sinon", async () => {
+    const { GET } = await import("@/app/api/creneaux/route");
+    const res = asMockResponse(await GET());
+
+    expect(res.status).toBe(200);
+    const creneaux = (
+      res.body as { creneaux: Array<{ id: string; lieu?: string }> }
+    ).creneaux;
+
+    // Lieu repris tel quel du champ `location` Google.
+    expect(creneaux.find((c) => c.id === "evt-collectif")?.lieu).toBe(
+      "Studio Bellecour, 69002 Lyon",
+    );
+    // Lieu non saisi → absent (l'UI affichera « Lieu à confirmer »).
+    expect(creneaux.find((c) => c.id === "evt-particulier")?.lieu).toBeUndefined();
   });
 
   it("agrège correctement plusieurs inscrits sur le même créneau", async () => {
