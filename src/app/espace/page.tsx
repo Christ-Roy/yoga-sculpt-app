@@ -6,13 +6,15 @@ import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
 import type { Booking } from "@/lib/db-types";
 import { calculerSolde, type LigneSolde } from "@/components/espace/solde";
+import { categoriserSourceTicket } from "@/lib/reservation";
+import type { TicketSource } from "@/lib/db-types";
 import { DashboardGrid } from "@/components/espace/DashboardGrid";
+import { DashboardTiles } from "@/components/espace/DashboardTiles";
 import {
   SeancesAVenirWidget,
   type SeanceWidget,
 } from "@/components/espace/SeancesAVenirWidget";
 import { TicketsWidget } from "@/components/espace/TicketsWidget";
-import { ReserverWidget } from "@/components/espace/ReserverWidget";
 import { ParrainageWidget } from "@/components/espace/ParrainageWidget";
 import { WelcomeTicketBanner } from "@/components/espace/WelcomeTicketBanner";
 import { resoudreLieuxParEvent } from "@/lib/booking-lieu";
@@ -80,6 +82,20 @@ export default async function EspacePage() {
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
   const solde = calculerSolde((tickets ?? []) as LigneSolde[]);
 
+  // Séances OFFERTES encore disponibles (welcome / parrainage / geste commercial).
+  // Sert la tuile « Vos séances gratuites en ligne » de la mosaïque : on incite
+  // à les consommer. On somme les quantités restantes des tickets « offert ».
+  const seancesGratuites = ((tickets ?? []) as {
+    quantite_restante: number;
+    source: TicketSource | null;
+  }[]).reduce(
+    (acc, t) =>
+      categoriserSourceTicket(t.source) === "offert"
+        ? acc + (t.quantite_restante ?? 0)
+        : acc,
+    0,
+  );
+
   // Bannière parrainage : affichée tant qu'il reste des séances offertes à
   // gagner (le parrain est crédité 1 ticket/filleul, plafond = celui appliqué au
   // serveur via maxParrainagesCredites — plus de magie « 3 » dupliquée ici).
@@ -127,6 +143,11 @@ export default async function EspacePage() {
 
       {resteSeancesAGagner && <WelcomeTicketBanner />}
 
+      {/* Mosaïque de tuiles de navigation (accès rapides) — pensée mobile-first :
+          grille tactile 2 colonnes au pouce, plus large sur grand écran. La tuile
+          « séances gratuites » n'apparaît que si le user a des tickets offerts. */}
+      <DashboardTiles seancesGratuites={seancesGratuites} />
+
       <DashboardGrid>
         {/* Séances à venir — widget « héros », plus large sur grand écran. */}
         <div className="md:col-span-2 xl:col-span-2">
@@ -135,12 +156,11 @@ export default async function EspacePage() {
 
         <TicketsWidget solde={solde} error={Boolean(ticketsErr)} />
 
-        <ReserverWidget />
-
         <ParrainageWidget />
 
-        {/* Profil — la carte existante (édition inline), élargie sur 2 colonnes. */}
-        <div className="md:col-span-2 xl:col-span-2">
+        {/* Profil — la carte existante (édition inline), élargie sur 2 colonnes.
+            `scroll-mt` : décale l'ancrage sous la topbar sticky mobile. */}
+        <div id="mon-profil" className="scroll-mt-20 md:col-span-2 xl:col-span-2">
           <ProfileCard
             email={email}
             fullName={profile?.full_name ?? null}
