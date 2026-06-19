@@ -1,24 +1,33 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Tests de login/page.tsx — capture du code de parrainage `?ref=` en cookies.
+ * Tests de la capture du code de parrainage `?ref=` → cookies, faite par le
+ * MIDDLEWARE (src/middleware.ts), PAS par le render de login/page.tsx.
+ *
+ * Pourquoi le middleware : écrire un cookie pendant le rendu d'une page (Server
+ * Component, GET) est interdit par Next 16 et lève un 500 sur le runtime
+ * Cloudflare Workers (« Cookies can only be modified in a Server Action or
+ * Route Handler »). Le middleware écrit légitimement sur la NextResponse.
  *
  * Vérifie le maillon d'entrée du parrainage (le filleul arrive sur
  * `/login?ref=<CODE>`) :
  *   - un code VALIDE pose DEUX cookies : `ys_ref` (httpOnly, lu par le callback
  *     serveur) ET `ys_ref_pub` (JS-lisible, lu par le FingerprintCollector) ;
- *   - les attributs de sécurité sont corrects (sameSite=lax pour survivre au
- *     redirect OAuth, path=/, maxAge borné) ;
+ *   - attributs de sécurité corrects (sameSite=lax pour survivre au redirect
+ *     OAuth, path=/, maxAge borné, secure en prod) ;
  *   - un code INVALIDE / absent ne pose AUCUN cookie (pas d'injection de valeur).
  *
- * On rend la page (Server Component async) en mockant ses enfants (composants
- * client) et `next/headers` pour intercepter les écritures de cookies. On
- * n'assert PAS sur le JSX : seul l'effet de bord cookie compte.
+ * On mocke `updateSession` pour qu'il rende une NextResponse "vierge" : le
+ * middleware doit y déposer (ou non) les cookies de parrainage.
  */
 
-// Composants enfants mockés (évite de tirer du code "use client" en env node).
-vi.mock("@/components/Logo", () => ({ Logo: () => null }));
-vi.mock("@/app/login/LoginForm", () => ({ LoginForm: () => null }));
+import { NextRequest, NextResponse } from "next/server";
+
+// updateSession ne doit rien faire d'autre que rendre une réponse passante :
+// on isole ainsi la logique de dépôt du cookie de parrainage.
+vi.mock("@/lib/supabase/proxy", () => ({
+  updateSession: vi.fn(async () => NextResponse.next()),
+}));
 
 type SetCall = {
   name: string;
@@ -26,18 +35,25 @@ type SetCall = {
   options: Record<string, unknown>;
 };
 
-let setCalls: SetCall[];
+/** Lit les cookies posés par le middleware sur la réponse. */
+function cookiesPosees(res: NextResponse): SetCall[] {
+  return res.cookies.getAll().map((c) => ({
+    name: c.name,
+    value: c.value,
+    options: c as unknown as Record<string, unknown>,
+  }));
+}
 
-vi.mock("next/headers", () => ({
-  cookies: vi.fn(async () => ({
-    set: (name: string, value: string, options: Record<string, unknown>) => {
-      setCalls.push({ name, value, options });
-    },
-  })),
-}));
+async function runMiddleware(ref?: string): Promise<NextResponse> {
+  const { middleware } = await import("@/middleware");
+  const url = ref
+    ? `https://app.yoga-sculpt.fr/login?ref=${ref}`
+    : "https://app.yoga-sculpt.fr/login";
+  const req = new NextRequest(url);
+  return (await middleware(req)) as NextResponse;
+}
 
 beforeEach(() => {
-  setCalls = [];
   vi.clearAllMocks();
 });
 
@@ -45,15 +61,10 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function renderWith(ref?: string) {
-  const { default: LoginPage } = await import("@/app/login/page");
-  // searchParams est une Promise en Next 16.
-  await LoginPage({ searchParams: Promise.resolve(ref ? { ref } : {}) });
-}
-
-describe("login/page.tsx — capture du cookie de parrainage", () => {
+describe("middleware — capture du cookie de parrainage `?ref=`", () => {
   it("pose ys_ref (httpOnly) ET ys_ref_pub (JS-lisible) sur un code valide", async () => {
-    await renderWith("ABCD2345");
+    const res = await runMiddleware("ABCD2345");
+    const setCalls = cookiesPosees(res);
 
     const ysRef = setCalls.find((c) => c.name === "ys_ref");
     const ysRefPub = setCalls.find((c) => c.name === "ys_ref_pub");
@@ -74,29 +85,31 @@ describe("login/page.tsx — capture du cookie de parrainage", () => {
   });
 
   it("normalise un code en minuscules avant de le poser", async () => {
-    await renderWith("abcd2345");
+    const setCalls = cookiesPosees(await runMiddleware("abcd2345"));
     expect(setCalls.find((c) => c.name === "ys_ref")?.value).toBe("ABCD2345");
     expect(setCalls.find((c) => c.name === "ys_ref_pub")?.value).toBe("ABCD2345");
   });
 
-  it("ne pose AUCUN cookie sans param ?ref=", async () => {
-    await renderWith(undefined);
-    expect(setCalls).toHaveLength(0);
+  it("ne pose AUCUN cookie de parrainage sans param ?ref=", async () => {
+    const setCalls = cookiesPosees(await runMiddleware(undefined));
+    expect(setCalls.find((c) => c.name.startsWith("ys_ref"))).toBeUndefined();
   });
 
   it("ne pose AUCUN cookie sur un code invalide (anti-injection)", async () => {
-    await renderWith("<script>alert(1)</script>");
-    expect(setCalls).toHaveLength(0);
+    const setCalls = cookiesPosees(
+      await runMiddleware(encodeURIComponent("<script>alert(1)</script>")),
+    );
+    expect(setCalls.find((c) => c.name.startsWith("ys_ref"))).toBeUndefined();
   });
 
   it("ne pose AUCUN cookie sur un code de longueur incorrecte", async () => {
-    await renderWith("ABC");
-    expect(setCalls).toHaveLength(0);
+    const setCalls = cookiesPosees(await runMiddleware("ABC"));
+    expect(setCalls.find((c) => c.name.startsWith("ys_ref"))).toBeUndefined();
   });
 
   it("marque les cookies secure en production", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    await renderWith("ABCD2345");
+    const setCalls = cookiesPosees(await runMiddleware("ABCD2345"));
     expect(setCalls.find((c) => c.name === "ys_ref")?.options.secure).toBe(true);
     expect(setCalls.find((c) => c.name === "ys_ref_pub")?.options.secure).toBe(
       true,
