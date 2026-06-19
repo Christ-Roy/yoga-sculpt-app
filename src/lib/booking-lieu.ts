@@ -22,6 +22,9 @@
 
 import { listEvents } from "@/lib/google-calendar";
 import { fenetreCreneaux } from "@/lib/reservation";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("booking-lieu");
 
 /** Sous-ensemble d'un booking nécessaire à la résolution du lieu. */
 interface BookingLieuInput {
@@ -71,7 +74,7 @@ export async function resoudreLieuxParEvent(
   } catch (err) {
     // Google indisponible : lieu inconnu pour toutes les séances (UI → « à
     // confirmer »). On ne casse pas l'affichage des séances pour autant.
-    console.error("[booking-lieu] listEvents indisponible :", err);
+    log.error("listEvents indisponible", { err: serializeError(err) });
     return lieuxParEvent;
   }
 

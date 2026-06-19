@@ -23,6 +23,9 @@ import {
   type Creneau,
 } from "@/lib/reservation";
 import type { Booking, TicketType } from "@/lib/db-types";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin-data");
 
 // ============================================================================
 // Hypothèse de calcul du CA (documentée)
@@ -310,7 +313,7 @@ async function chargerCreneauxGoogle(maintenant: Date) {
     return await listEvents({ timeMin, timeMax, maxResults: 250 });
   } catch (err) {
     // On log côté serveur pour diagnostic, sans casser la page.
-    console.error("[admin-data] listEvents indisponible :", err);
+    log.error("listEvents indisponible", { err: serializeError(err) });
     return [];
   }
 }

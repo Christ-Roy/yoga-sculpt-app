@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { freeBusyQuery } from "@/lib/google-calendar";
+import { createLogger, serializeError } from "@/lib/log";
 import {
   genererSlotsLibres,
   PARTICULIER_HORIZON_JOURS,
   type SlotLibre,
 } from "@/lib/reservation";
+
+const log = createLogger("creneaux/particulier");
 
 /**
  * GET /api/creneaux/particulier — créneaux LIBRES pour un cours particulier.
@@ -54,7 +57,7 @@ export async function GET() {
   try {
     busy = await freeBusyQuery(timeMin, timeMax);
   } catch (err) {
-    console.error("[creneaux/particulier] freebusy échoué :", err);
+    log.error("freebusy échoué", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Impossible de charger les disponibilités." },
       { status: 502 },

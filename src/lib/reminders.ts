@@ -38,6 +38,9 @@ import {
   COULEURS,
 } from "@/lib/email-templates";
 import type { TicketType } from "@/lib/db-types";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("reminders");
 
 // ============================================================================
 // Constantes
@@ -270,7 +273,7 @@ async function chargerProfils(
     .in("id", userIds);
 
   if (error) {
-    console.error("[reminders] Chargement des profils échoué :", error.message);
+    log.error("Chargement des profils échoué", { db: error.message });
     return map;
   }
 
@@ -317,10 +320,7 @@ async function traiterRappels(
     .is(colonne, null);
 
   if (error) {
-    console.error(
-      `[reminders] Scan ${kind} échoué :`,
-      error.message,
-    );
+    log.error("Scan échoué", { kind, db: error.message });
     return { envoyes: 0, erreurs: 1 };
   }
 
@@ -342,10 +342,11 @@ async function traiterRappels(
       // Pas d'email exploitable : on log et on passe (on N'horodate PAS, ainsi
       // un profil complété entre-temps pourra encore recevoir le rappel tant
       // qu'on est dans la fenêtre).
-      console.error(
-        `[reminders] ${kind} : aucun email pour user=${booking.user_id} ` +
-          `(booking=${booking.id}) — ignoré.`,
-      );
+      log.error("aucun email pour le user — ignoré", {
+        kind,
+        user_id: booking.user_id,
+        booking_id: booking.id,
+      });
       continue;
     }
 
@@ -371,11 +372,11 @@ async function traiterRappels(
       // le prochain tick (dans 15 min) retentera tant que la résa est encore
       // dans la fenêtre. (Au-delà de la fenêtre, le rappel est définitivement
       // raté — acceptable, c'est un rappel, pas une transaction critique.)
-      console.error(
-        `[reminders] ${kind} : envoi échoué pour ${email} ` +
-          `(booking=${booking.id}) :`,
-        err,
-      );
+      log.error("envoi échoué", {
+        kind,
+        booking_id: booking.id,
+        err: serializeError(err),
+      });
       erreurs += 1;
       continue;
     }
@@ -389,11 +390,12 @@ async function traiterRappels(
     if (updErr) {
       // L'email est parti mais l'horodatage a échoué : risque de doublon au
       // prochain tick. On le signale explicitement (rare, mais traçable).
-      console.error(
-        `[reminders] ${kind} : email envoyé mais horodatage ${colonne} ` +
-          `échoué pour booking=${booking.id} (risque de doublon) :`,
-        updErr.message,
-      );
+      log.error("email envoyé mais horodatage échoué (risque de doublon)", {
+        kind,
+        colonne,
+        booking_id: booking.id,
+        db: updErr.message,
+      });
       erreurs += 1;
     }
 
@@ -421,10 +423,11 @@ export async function scanAndSendReminders(): Promise<ResultatRappels> {
     erreurs: j1.erreurs + h2.erreurs,
   };
 
-  console.info(
-    `[reminders] Passage terminé — J-1: ${resultat.j1Envoyes}, ` +
-      `H-2: ${resultat.h2Envoyes}, erreurs: ${resultat.erreurs}.`,
-  );
+  log.info("Passage terminé", {
+    j1: resultat.j1Envoyes,
+    h2: resultat.h2Envoyes,
+    erreurs: resultat.erreurs,
+  });
 
   return resultat;
 }

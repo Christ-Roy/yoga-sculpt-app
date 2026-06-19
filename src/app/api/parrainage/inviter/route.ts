@@ -6,6 +6,9 @@ import { getOrCreateCode, normaliserEmail } from "@/lib/referral";
 import { isDisposableEmail } from "@/lib/anti-abuse";
 import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
 import { logEvent } from "@/lib/events";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("parrainage/inviter");
 
 /**
  * POST /api/parrainage/inviter — le membre connecté invite un filleul par e-mail.
@@ -128,7 +131,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    console.error("[parrainage/inviter] Insert referral échoué :", insertErr.message);
+    log.error("Insert referral échoué", { db: insertErr.message });
     return NextResponse.json(
       { error: "Invitation impossible. Réessayez." },
       { status: 500 },
@@ -143,7 +146,7 @@ export async function POST(request: Request) {
   await envoyerInvitation({ filleulEmail: email, code, parrainNom }).catch(
     (err) => {
       // L'invitation est enregistrée : un échec d'e-mail ne doit pas la perdre.
-      console.error("[parrainage/inviter] Envoi e-mail échoué (non bloquant) :", err);
+      log.error("Envoi e-mail échoué (non bloquant)", { err: serializeError(err) });
     },
   );
 
@@ -175,8 +178,8 @@ async function envoyerInvitation(params: {
   const senderName = process.env.BREVO_INVITE_SENDER_NAME ?? "Yoga Sculpt";
 
   if (!apiKey) {
-    console.warn(
-      "[parrainage/inviter] BREVO_API_KEY absente — e-mail d'invitation non envoyé (invitation enregistrée).",
+    log.warn(
+      "BREVO_API_KEY absente — e-mail d'invitation non envoyé (invitation enregistrée).",
     );
     return;
   }
@@ -236,7 +239,7 @@ async function envoyerInvitation(params: {
 
   if (!resp.ok) {
     const body = await resp.text();
-    console.error(`[parrainage/inviter] Brevo a renvoyé ${resp.status} : ${body}`);
+    log.error("Brevo a renvoyé une erreur", { status: resp.status, body });
   }
 }
 

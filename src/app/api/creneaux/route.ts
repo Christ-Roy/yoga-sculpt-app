@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { listEvents } from "@/lib/google-calendar";
+import { createLogger, serializeError } from "@/lib/log";
 import {
   eventVersCreneau,
   fenetreCreneaux,
   type Creneau,
 } from "@/lib/reservation";
+
+const log = createLogger("creneaux");
 
 /**
  * GET /api/creneaux — liste les créneaux réservables.
@@ -63,7 +66,7 @@ export async function GET() {
       maxResults: 250,
     });
   } catch (err) {
-    console.error("[creneaux] Lecture Google Calendar échouée :", err);
+    log.error("Lecture Google Calendar échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Impossible de charger les créneaux." },
       { status: 502 },
@@ -91,7 +94,7 @@ export async function GET() {
     if (error) {
       // On ne casse pas l'affichage des créneaux pour un simple compteur
       // informatif : on log et on continue avec `inscrits = 0`.
-      console.error("[creneaux] Comptage des inscrits échoué :", error.message);
+      log.error("Comptage des inscrits échoué", { db: error.message });
     } else {
       for (const b of bookings ?? []) {
         const cid = b.google_calendar_creneau_id;
@@ -117,8 +120,9 @@ export async function GET() {
     // Lieu manquant : on garde le créneau (cf. choix documenté en tête de
     // fichier) mais on le signale dans les logs pour qu'Alice complète l'event.
     if (!creneau.lieu) {
-      console.warn(
-        `[creneaux] Lieu manquant sur l'event ${creneau.id} — Alice doit renseigner le champ « Lieu » (UI affichera « Lieu à confirmer »).`,
+      log.warn(
+        "Lieu manquant sur un event — Alice doit renseigner le champ « Lieu » (UI affichera « Lieu à confirmer »).",
+        { eventId: creneau.id },
       );
     }
   }

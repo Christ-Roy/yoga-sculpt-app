@@ -3,6 +3,9 @@ import { getEvent } from "@/lib/google-calendar";
 import type { Booking } from "@/lib/db-types";
 import { libelleType } from "@/lib/reservation";
 import { buildIcs, icsFileName, type SeanceAgenda } from "@/lib/calendar-export";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("ics");
 
 /**
  * GET /api/ics/[bookingId] — télécharge le fichier .ics d'une réservation.
@@ -50,7 +53,7 @@ export async function GET(
     .maybeSingle();
 
   if (error) {
-    console.error("[ics] Lecture booking échouée :", error.message);
+    log.error("Lecture booking échouée", { db: error.message });
     return new Response("Erreur serveur.", { status: 500 });
   }
   if (!row) {

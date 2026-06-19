@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
+import { createLogger, serializeError } from "@/lib/log";
 import { inviterBodySchema } from "../_lib/validation";
 import { inviterEmail } from "../_lib/auth-admin";
+
+const log = createLogger("admin/inviter");
 
 /**
  * POST /api/admin/users/inviter — (ré)invite un e-mail (PRÉ-CRÉATION de compte).
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
   try {
     const result = await inviterEmail(email);
 
-    console.log(`[admin/inviter] ${admin.email} a invité ${email}.`);
+    log.info("Admin a invité un utilisateur", { adminId: admin.userId });
 
     return NextResponse.json({
       ok: true,
@@ -62,7 +65,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    console.error("[admin/inviter] GoTrue a échoué :", err);
+    log.error("GoTrue a échoué", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Invitation impossible. Réessayez." },
       { status: 500 },

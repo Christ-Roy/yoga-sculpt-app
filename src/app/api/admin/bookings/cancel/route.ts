@@ -9,6 +9,9 @@ import {
   decisionAnnulationAdmin,
   quantiteApresRecredit,
 } from "../_logic";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/cancel");
 
 /**
  * POST /api/admin/bookings/cancel — Alice annule une réservation AU NOM d'un
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (loadErr) {
-    console.error("[admin/cancel] Lecture du booking échouée :", loadErr.message);
+    log.error("Lecture du booking échouée", { db: loadErr.message });
     return NextResponse.json(
       { error: "Impossible de charger la réservation." },
       { status: 500 },
@@ -118,7 +121,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (cancelErr) {
-    console.error("[admin/cancel] Update booking échoué :", cancelErr.message);
+    log.error("Update booking échoué", { db: cancelErr.message });
     return NextResponse.json({ error: "Annulation impossible." }, { status: 500 });
   }
   if (!cancelledRow) {
@@ -135,10 +138,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (ticketLoadErr) {
-      console.error(
-        "[admin/cancel] Lecture ticket pour recrédit échouée :",
-        ticketLoadErr.message,
-      );
+      log.error("Lecture ticket pour recrédit échouée", { db: ticketLoadErr.message });
     } else if (ticketRow) {
       const ticket = ticketRow as Ticket;
       const recredite = quantiteApresRecredit(
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
         .update({ quantite_restante: recredite })
         .eq("id", ticket.id);
       if (recreditErr) {
-        console.error("[admin/cancel] Recrédit ticket échoué :", recreditErr.message);
+        log.error("Recrédit ticket échoué", { db: recreditErr.message });
       }
     }
   }
@@ -174,10 +174,9 @@ export async function POST(request: Request) {
     } catch (err) {
       // L'annulation métier (étape 4) a réussi : on n'échoue pas pour un effet
       // de bord Google. Log pour réconciliation manuelle.
-      console.error(
-        "[admin/cancel] Retrait attendee Google échoué (annulation maintenue) :",
-        err,
-      );
+      log.error("Retrait attendee Google échoué (annulation maintenue)", {
+        err: serializeError(err),
+      });
     }
   }
 

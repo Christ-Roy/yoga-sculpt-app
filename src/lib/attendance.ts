@@ -23,6 +23,9 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { logEvent } from "@/lib/events";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("attendance");
 
 /** Résultat agrégé d'un passage d'attendance. */
 export interface ResultatAttendance {
@@ -62,7 +65,7 @@ export async function markPastBookingsAttended(
     .limit(LOT_MAX);
 
   if (error) {
-    console.error("[attendance] Scan des séances passées échoué :", error.message);
+    log.error("Scan des séances passées échoué", { db: error.message });
     return { marquees: 0, erreurs: 1 };
   }
 
@@ -92,10 +95,10 @@ export async function markPastBookingsAttended(
       .maybeSingle();
 
     if (claimErr) {
-      console.error(
-        `[attendance] Marquage attended_event_at échoué (booking=${b.id}) :`,
-        claimErr.message,
-      );
+      log.error("Marquage attended_event_at échoué", {
+        booking_id: b.id,
+        db: claimErr.message,
+      });
       erreurs += 1;
       continue;
     }
@@ -122,9 +125,9 @@ export async function markPastBookingsAttended(
       // L'event n'a pas pu être écrit alors qu'on a déjà posé le marqueur :
       // l'event est perdu mais le COMPTEUR (dérivé de bookings) reste juste.
       // On le signale, sans rollback (rollback ré-ouvrirait la course).
-      console.error(
-        `[attendance] booking_attended non journalisé pour booking=${b.id} ` +
-          `(marqueur posé, event perdu — compteur dérivé reste correct).`,
+      log.error(
+        "booking_attended non journalisé (marqueur posé, event perdu — compteur dérivé reste correct)",
+        { booking_id: b.id },
       );
       erreurs += 1;
     }

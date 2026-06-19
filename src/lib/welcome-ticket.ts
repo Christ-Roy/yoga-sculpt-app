@@ -31,6 +31,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canGrantWelcomeTicket } from "@/lib/anti-abuse";
 import { logEvent } from "@/lib/events";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("welcome");
 
 /** Code d'erreur PostgreSQL pour une violation d'unicité. */
 const PG_UNIQUE_VIOLATION = "23505";
@@ -73,7 +76,7 @@ export async function grantWelcomeTicket(
     .maybeSingle();
 
   if (readErr) {
-    console.error("[welcome] Lecture profile échouée :", readErr.message);
+    log.error("Lecture profile échouée", { db: readErr.message });
     return { granted: false }; // côté sûr : on ne crédite pas dans le doute.
   }
   if (profile?.welcome_ticket_granted_at) {
@@ -112,7 +115,7 @@ export async function grantWelcomeTicket(
       await marquerFlag(service, userId);
       return { granted: false };
     }
-    console.error("[welcome] Insert ticket bienvenue échoué :", insertErr.message);
+    log.error("Insert ticket bienvenue échoué", { db: insertErr.message });
     return { granted: false };
   }
 
@@ -143,6 +146,8 @@ async function marquerFlag(
     .eq("id", userId)
     .is("welcome_ticket_granted_at", null);
   if (error) {
-    console.error("[welcome] Pose du flag welcome_ticket_granted_at échouée :", error.message);
+    log.error("Pose du flag welcome_ticket_granted_at échouée", {
+      db: error.message,
+    });
   }
 }

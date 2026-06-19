@@ -8,6 +8,9 @@ import {
   expanserDatesHebdo,
 } from "../lib";
 import { chargerPreset } from "../data";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/creneaux/apply");
 
 /**
  * POST /api/admin/creneaux/apply — applique un PRESET à une date (1..N events).
@@ -60,7 +63,7 @@ export async function POST(request: Request) {
   try {
     preset = await chargerPreset(presetId);
   } catch (err) {
-    console.error("[admin/creneaux/apply] Lecture preset échouée :", err);
+    log.error("Lecture preset échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Impossible de charger le modèle." },
       { status: 500 },
@@ -100,10 +103,7 @@ export async function POST(request: Request) {
       if (creneau) creneaux.push(creneau);
     } catch (err) {
       echecs++;
-      console.error(
-        `[admin/creneaux/apply] Création event (date ${d}) échouée :`,
-        err,
-      );
+      log.error("Création event échouée", { date: d, err: serializeError(err) });
     }
   }
 

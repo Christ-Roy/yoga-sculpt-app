@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { attendanceBodySchema, attendanceToColumn } from "../_logic";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("admin/attendance");
 
 /**
  * POST /api/admin/bookings/attendance — Alice pointe la présence d'un client
@@ -58,7 +61,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (loadErr) {
-    console.error("[admin/attendance] Lecture du booking échouée :", loadErr.message);
+    log.error("Lecture du booking échouée", { db: loadErr.message });
     return NextResponse.json(
       { error: "Impossible de charger la réservation." },
       { status: 500 },
@@ -78,7 +81,7 @@ export async function POST(request: Request) {
     .eq("id", body.bookingId);
 
   if (updateErr) {
-    console.error("[admin/attendance] Update présence échoué :", updateErr.message);
+    log.error("Update présence échoué", { db: updateErr.message });
     return NextResponse.json(
       { error: "Enregistrement de la présence impossible." },
       { status: 500 },

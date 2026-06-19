@@ -30,6 +30,9 @@
 
 import type { User } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/service";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("dev-auth");
 
 /**
  * Calcule l'état du bypass à partir d'un environnement donné. FONCTION PURE
@@ -98,9 +101,9 @@ export async function loadDevBypassUser(): Promise<User | null> {
       DEV_BYPASS_USER_ID,
     );
     if (error || !data?.user) {
-      console.warn(
-        `[dev-auth] bypass actif mais user de test introuvable (${DEV_BYPASS_USER_ID}). ` +
-          `Vérifie DEV_BYPASS_USER_ID / le compte onboarding-dev en staging.`,
+      log.warn(
+        "bypass actif mais user de test introuvable — vérifie DEV_BYPASS_USER_ID / le compte onboarding-dev en staging",
+        { user_id: DEV_BYPASS_USER_ID },
       );
       cachedBypassUser = null;
       return null;
@@ -108,7 +111,7 @@ export async function loadDevBypassUser(): Promise<User | null> {
     cachedBypassUser = data.user;
     return cachedBypassUser;
   } catch (e) {
-    console.warn("[dev-auth] échec chargement du user de test :", e);
+    log.warn("échec chargement du user de test", { err: serializeError(e) });
     cachedBypassUser = null;
     return null;
   }

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
+import { createLogger } from "@/lib/log";
 import { ticketsBodySchema } from "../_lib/validation";
 import { crediterTickets, debiterTickets } from "../_lib/tickets-admin";
 import { lireUtilisateur } from "../_lib/auth-admin";
+
+const log = createLogger("admin/tickets");
 
 /**
  * POST /api/admin/users/tickets — CRÉDIT / DÉBIT manuel de séances par l'admin.
@@ -53,9 +56,15 @@ export async function POST(request: Request) {
       : await debiterTickets(body);
 
   // Trace (sans donnée sensible) : qui a fait quoi, sur qui.
-  console.log(
-    `[admin/tickets] ${admin.email} ${body.sens} ${body.quantite} ${body.type} → ${body.userId} (op ${body.opId}) : ${res.message}`,
-  );
+  log.info("Admin a ajusté des tickets", {
+    adminId: admin.userId,
+    cibleId: body.userId,
+    sens: body.sens,
+    quantite: body.quantite,
+    type: body.type,
+    opId: body.opId,
+    message: res.message,
+  });
 
   if (!res.ok) {
     // Refus métier (solde insuffisant / concurrence) → 409 ; échec d'écriture → 500.

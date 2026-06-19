@@ -18,6 +18,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("anti-abuse");
 
 /**
  * Liste (non exhaustive) de domaines d'e-mails jetables courants. Suffisant
@@ -176,7 +179,7 @@ export async function canCreditReferral(
     .eq("ticket_credite", true)
     .limit(1);
   if (dejaErr) {
-    console.error("[anti-abuse] Lecture referrals (R4) échouée :", dejaErr.message);
+    log.error("Lecture referrals (R4) échouée", { db: dejaErr.message });
     return false; // côté sûr : on ne crédite pas si on ne peut pas vérifier.
   }
   if (dejaCredite && dejaCredite.length > 0) {
@@ -202,7 +205,7 @@ export async function canCreditReferral(
       .neq("user_id", filleulUserId)
       .limit(2);
     if (ipErr) {
-      console.error("[anti-abuse] Lecture account_signals IP (R2) échouée :", ipErr.message);
+      log.error("Lecture account_signals IP (R2) échouée", { db: ipErr.message });
       return false;
     }
     if (ipDup && ipDup.length >= 2) {
@@ -218,10 +221,9 @@ export async function canCreditReferral(
       .neq("user_id", filleulUserId)
       .limit(1);
     if (fpErr) {
-      console.error(
-        "[anti-abuse] Lecture account_signals fingerprint (R3) échouée :",
-        fpErr.message,
-      );
+      log.error("Lecture account_signals fingerprint (R3) échouée", {
+        db: fpErr.message,
+      });
       return false;
     }
     if (fpDup && fpDup.length > 0) {
@@ -259,7 +261,7 @@ async function hasSharedSignals(
       .neq("user_id", userId)
       .limit(1);
     if (ipErr) {
-      console.error("[anti-abuse] Lecture account_signals IP échouée :", ipErr.message);
+      log.error("Lecture account_signals IP échouée", { db: ipErr.message });
       return true; // côté sûr : on présume le doublon → l'appelant ne crédite pas.
     }
     if (ipDup && ipDup.length > 0) return true;
@@ -273,10 +275,9 @@ async function hasSharedSignals(
       .neq("user_id", userId)
       .limit(1);
     if (fpErr) {
-      console.error(
-        "[anti-abuse] Lecture account_signals fingerprint échouée :",
-        fpErr.message,
-      );
+      log.error("Lecture account_signals fingerprint échouée", {
+        db: fpErr.message,
+      });
       return true;
     }
     if (fpDup && fpDup.length > 0) return true;
