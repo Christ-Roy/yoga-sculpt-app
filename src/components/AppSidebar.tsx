@@ -27,6 +27,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 /** Liens de navigation de l'espace client. */
@@ -62,6 +63,13 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
+  // Sur mobile, la sidebar est un drawer (Sheet) qui PERSISTE entre les pages
+  // /espace (layout monté en continu) → il faut le refermer après un clic sur un
+  // lien, sinon il reste ouvert par-dessus la nouvelle page. Sur desktop, no-op.
+  const { isMobile, setOpenMobile } = useSidebar();
+  const fermerSiMobile = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   // Tickets de parrainage encore à gagner (PARRAINAGE_MAX - déjà gagnés).
   // > 0 → pastille rouge animée sur "Parrainer" pour inciter à inviter.
@@ -119,7 +127,11 @@ export function AppSidebar({
                       isActive={estActif(lien.href)}
                       tooltip={lien.label}
                     >
-                      <Link href={lien.href} className="relative">
+                      <Link
+                        href={lien.href}
+                        onClick={fermerSiMobile}
+                        className="relative"
+                      >
                         <span className="relative">
                           <Icone />
                           {/* Pastille rouge animée : tickets de parrainage à gagner */}
@@ -164,7 +176,7 @@ export function AppSidebar({
                     isActive={pathname.startsWith("/admin")}
                     tooltip="Administration"
                   >
-                    <Link href="/admin">
+                    <Link href="/admin" onClick={fermerSiMobile}>
                       <LayoutDashboard />
                       <span>Administration</span>
                     </Link>

@@ -304,7 +304,11 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "bg-bg relative flex w-full flex-1 flex-col",
+        // `overflow-x-clip` : garde-fou anti scroll horizontal parasite sur
+        // mobile (un enfant trop large ne fait jamais déborder la page). `clip`
+        // plutôt que `hidden` → n'établit pas de conteneur de scroll, donc la
+        // topbar `sticky` continue de fonctionner.
+        "bg-bg relative flex w-full flex-1 flex-col overflow-x-clip",
         "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-[var(--radius)] md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2 min-w-0",
         className,
       )}
