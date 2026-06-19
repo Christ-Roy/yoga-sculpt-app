@@ -371,7 +371,7 @@ export function ReservationsManager({
                 type="checkbox"
                 checked={recreditCancel}
                 onChange={(e) => setRecreditCancel(e.target.checked)}
-                className="mt-0.5 accent-[var(--gold)]"
+                className="mt-0.5 accent-accent"
               />
               <span>
                 Recréditer le ticket de la cliente (recommandé).
@@ -382,7 +382,7 @@ export function ReservationsManager({
                 type="checkbox"
                 checked={forceCancel}
                 onChange={(e) => setForceCancel(e.target.checked)}
-                className="mt-0.5 accent-[var(--gold)]"
+                className="mt-0.5 accent-accent"
               />
               <span>
                 Forcer l&apos;annulation même à moins de 24h du cours.
