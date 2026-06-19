@@ -86,6 +86,122 @@ export async function prenomParrainParCode(
 }
 
 /**
+ * Vue PUBLIQUE d'un parrain pour la landing d'invitation — prénom + avatar +
+ * e-mail. Tout champ est `null` quand il est absent (best-effort).
+ */
+export interface ParrainPublic {
+  /** Premier token du nom complet (le prénom seul, jamais le nom de famille). */
+  prenom: string | null;
+  /** Photo de profil OAuth (Google/Microsoft), image distante. `null` sinon. */
+  avatarUrl: string | null;
+  /** E-mail COMPLET du parrain — affichage validé par Robert (cf. ticket). */
+  email: string | null;
+}
+
+/**
+ * Résout les infos PUBLIQUES du parrain (prénom + avatar + e-mail) à partir d'un
+ * code de parrainage — pour la landing `/invitation?ref=<CODE>` enrichie (avatar
+ * + prénom + e-mail du parrain).
+ *
+ * Décision Robert (2026-06-19) : l'e-mail COMPLET est affiché en clair. Le
+ * parrain partage son lien volontairement à des gens qu'il connaît → e-mail
+ * assumé. (Reste à surveiller l'énumération de codes côté sécu — rate limiting
+ * éventuel sur /invitation, cf. ticket passe-sécurité — NON traité ici.)
+ *
+ * Garde-fous (SÉCURITÉ / VIE PRIVÉE) :
+ *   - `code` SANITISÉ (sanitizeRefCode) : 8 chars de l'alphabet non ambigu,
+ *     MAJUSCULES. Hors-norme → tout `null` (aucune requête lancée).
+ *   - On n'expose QUE prénom + avatar + e-mail. JAMAIS le téléphone, l'id, ni
+ *     aucune autre PII. Le prénom = 1er token de `full_name`.
+ *   - L'avatar vient des claims OAuth dans `auth.users.raw_user_meta_data`
+ *     (`avatar_url` puis `picture`), lu via l'Admin API (getUserById) — la
+ *     table profiles ne le stocke pas. L'e-mail vient de `profiles.email`
+ *     (fallback `user.email`).
+ *   - Best-effort TOTAL : code inconnu, profil introuvable, erreur DB ou Admin
+ *     → champs à `null`, ne throw JAMAIS (page publique : pas de 500).
+ *
+ * @param service client `service_role` (bypass RLS + Admin API). La route est
+ *                publique ; on lit au nom du système, borné aux 3 champs publics.
+ * @param rawCode valeur brute du paramètre `?ref=` (non fiable).
+ */
+export async function parrainPublicParCode(
+  service: SupabaseClient,
+  rawCode: string | null | undefined,
+): Promise<ParrainPublic> {
+  const vide: ParrainPublic = { prenom: null, avatarUrl: null, email: null };
+
+  const code = sanitizeRefCode(rawCode);
+  if (!code) return vide;
+
+  try {
+    const { data, error } = await service
+      .from("profiles")
+      // Borné : id (pour l'Admin API), full_name (prénom), email. Pas de tél.
+      .select("id, full_name, email")
+      .eq("referral_code", code)
+      .maybeSingle();
+
+    if (error) {
+      log.error("Résolution parrain public échouée", { db: error.message });
+      return vide;
+    }
+    const parrainId = typeof data?.id === "string" ? data.id : null;
+    if (!parrainId) return vide; // code inconnu / aucun profil.
+
+    // Prénom = 1er token du nom complet (jamais le nom de famille).
+    const fullName =
+      typeof data?.full_name === "string" ? data.full_name.trim() : "";
+    const prenom = fullName ? (fullName.split(/\s+/)[0] ?? "") || null : null;
+
+    // E-mail : profiles.email (peut être enrichi par user.email plus bas).
+    let email =
+      typeof data?.email === "string" && data.email.trim()
+        ? data.email.trim()
+        : null;
+
+    // Avatar : claims OAuth dans auth.users.raw_user_meta_data, via Admin API.
+    // Best-effort : toute erreur ici NE doit pas annuler prénom/e-mail déjà
+    // résolus → on garde le reste, avatar à null.
+    let avatarUrl: string | null = null;
+    try {
+      const { data: userData, error: adminErr } =
+        await service.auth.admin.getUserById(parrainId);
+      if (adminErr) {
+        log.error("getUserById parrain échoué", { db: adminErr.message });
+      } else {
+        const meta = userData?.user?.user_metadata as
+          | Record<string, unknown>
+          | undefined;
+        const candidate =
+          (typeof meta?.avatar_url === "string" && meta.avatar_url) ||
+          (typeof meta?.picture === "string" && meta.picture) ||
+          null;
+        // On n'accepte qu'une URL http(s) — défense minimale contre une valeur
+        // de claim douteuse (pas de data:/javascript: dans un src d'image).
+        avatarUrl =
+          candidate && /^https?:\/\//i.test(candidate) ? candidate : null;
+        // Fallback e-mail si profiles.email était vide.
+        if (!email && typeof userData?.user?.email === "string") {
+          email = userData.user.email.trim() || null;
+        }
+      }
+    } catch (adminEx) {
+      log.error("Exception getUserById parrain", {
+        err: adminEx instanceof Error ? adminEx.message : String(adminEx),
+      });
+    }
+
+    return { prenom, avatarUrl, email };
+  } catch (err) {
+    // Page PUBLIQUE : un lookup raté ne doit jamais la faire planter en 500.
+    log.error("Exception résolution parrain public", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return vide;
+  }
+}
+
+/**
  * Plafond EFFECTIF de parrainages crédités par parrain (anti-farming).
  *
  * Lit la surcharge d'environnement `REFERRAL_MAX_CREDITS` si elle est un entier
