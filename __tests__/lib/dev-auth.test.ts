@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { computeDevAuthBypass } from "@/lib/dev-auth";
 
 /**
@@ -71,5 +71,55 @@ describe("computeDevAuthBypass — garde combinée (env + NODE_ENV)", () => {
 
   it("inactif si les deux conditions manquent (défaut sûr)", () => {
     expect(computeDevAuthBypass({})).toBe(false);
+  });
+});
+
+/**
+ * Tests de `loadDevBypassUser` — chargement best-effort du user de test (DEV).
+ * Mémorisé au niveau module → `vi.resetModules()` entre les cas pour repartir
+ * d'un cache vide. On mocke le service client (auth.admin.getUserById).
+ */
+const getUserByIdMock = vi.fn();
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceClient: vi.fn(() => ({
+    auth: { admin: { getUserById: getUserByIdMock } },
+  })),
+}));
+
+describe("loadDevBypassUser", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renvoie le user de test quand le service le trouve", async () => {
+    getUserByIdMock.mockResolvedValue({
+      data: { user: { id: "dev-user", email: "onboarding-dev@yoga-sculpt.fr" } },
+      error: null,
+    });
+    const { loadDevBypassUser } = await import("@/lib/dev-auth");
+    const user = await loadDevBypassUser();
+    expect(user?.id).toBe("dev-user");
+    // 2e appel : sert depuis le cache mémoire (pas de 2e requête).
+    await loadDevBypassUser();
+    expect(getUserByIdMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renvoie null si le compte de test est introuvable (best-effort)", async () => {
+    getUserByIdMock.mockResolvedValue({
+      data: { user: null },
+      error: { message: "not found" },
+    });
+    const { loadDevBypassUser } = await import("@/lib/dev-auth");
+    expect(await loadDevBypassUser()).toBeNull();
+  });
+
+  it("renvoie null si l'appel jette (clé service absente, etc.)", async () => {
+    getUserByIdMock.mockRejectedValue(new Error("no service key"));
+    const { loadDevBypassUser } = await import("@/lib/dev-auth");
+    expect(await loadDevBypassUser()).toBeNull();
   });
 });

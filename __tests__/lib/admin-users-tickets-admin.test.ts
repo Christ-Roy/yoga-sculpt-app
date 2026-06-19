@@ -61,6 +61,25 @@ describe("crediterTickets", () => {
     });
   });
 
+  it("ok=false si l'INSERT du ticket de crédit échoue (erreur DB remontée)", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [], error: null }); // idempotence
+    serviceMock.queueResult("tickets", "insert", {
+      data: null,
+      error: { message: "permission denied" },
+    });
+    const { crediterTickets } = await import(
+      "@/app/api/admin/users/_lib/tickets-admin"
+    );
+    const res = await crediterTickets({
+      userId: UID,
+      type: "collectif",
+      quantite: 3,
+      opId: OP,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/Crédit échoué/);
+  });
+
   it("est idempotent : un ticket déjà créé pour l'opId → pas de nouvel insert", async () => {
     // lookup idempotence : un ticket existe déjà.
     serviceMock.queueResult("tickets", "select", {
@@ -148,5 +167,41 @@ describe("debiterTickets", () => {
       (c) => c.table === "tickets" && c.op === "update",
     );
     expect(update?.payload).toMatchObject({ quantite_restante: 1 }); // 3 - 2
+  });
+
+  it("ok=false (débit partiel) si une course concurrente vide les tickets pendant le décrément", async () => {
+    // 1) soldeRestant (garde) : 3 dispo → on passe la garde.
+    serviceMock.queueResult("tickets", "select", {
+      data: [{ quantite_restante: 3 }],
+      error: null,
+    });
+    // 2) liste LIFO : un seul ticket de 3.
+    serviceMock.queueResult("tickets", "select", {
+      data: [{ id: "t1", quantite_restante: 3 }],
+      error: null,
+    });
+    // 3) update conditionnel → ERREUR (course perdue : ligne vidée entre-temps).
+    serviceMock.queueResult("tickets", "update", {
+      data: null,
+      error: { message: "no row updated (guard)" },
+    });
+    // 4) soldeRestant final.
+    serviceMock.queueResult("tickets", "select", {
+      data: [{ quantite_restante: 3 }],
+      error: null,
+    });
+
+    const { debiterTickets } = await import(
+      "@/app/api/admin/users/_lib/tickets-admin"
+    );
+    const res = await debiterTickets({
+      userId: UID,
+      type: "collectif",
+      quantite: 2,
+      opId: OP,
+    });
+    // reste > 0 → débit incomplet : on refuse plutôt que de mentir sur le solde.
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/concurrence|partiel/i);
   });
 });

@@ -184,6 +184,64 @@ describe("POST /api/reserver", () => {
     );
   });
 
+  it("renvoie 502 si la lecture de l'event Google échoue (erreur non-404)", async () => {
+    getEventMock.mockRejectedValueOnce(new Error("Google API HTTP 500 Internal"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(502);
+  });
+
+  it("renvoie 404 si l'event Google est annulé (status cancelled)", async () => {
+    getEventMock.mockResolvedValueOnce({ ...EVENT_OK, status: "cancelled" });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(404);
+  });
+
+  it("renvoie 422 si l'event a des bornes de dates inexploitables", async () => {
+    getEventMock.mockResolvedValueOnce({ ...EVENT_OK, start: {}, end: {} });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(422);
+  });
+
+  it("renvoie 500 (et PAS 402) si la lecture des tickets échoue (blip DB)", async () => {
+    // On ne dit pas « rachetez un ticket » sur un simple échec de lecture.
+    serviceMock.queueResult("tickets", "select", {
+      data: null,
+      error: { message: "connection reset" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(500);
+  });
+
+  it("renvoie 500 si l'insert booking échoue sur une erreur NON-unique", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: null,
+      error: { code: "23502", message: "null value violates not-null" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(500);
+  });
+
+  it("happy path reste 200 même si le reflet description (patchEvent) jette (best-effort)", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-x", status: "confirmed", ticket_id: TICKET.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: { id: TICKET.id }, error: null });
+    patchEventMock.mockRejectedValueOnce(new Error("Google PATCH 500"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    // La réservation est conservée malgré l'échec cosmétique du reflet agenda.
+    expect(res.status).toBe(200);
+    expect((res.body as { ok?: boolean }).ok).toBe(true);
+  });
+
   it("renvoie 409 + rollback du booking si la course sur le décrément est perdue", async () => {
     serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
     serviceMock.queueResult("bookings", "insert", {
@@ -242,6 +300,42 @@ describe("POST /api/reserver — cours particulier (créneau libre)", () => {
       ),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("garde 24h : refuse (400) un créneau valide en heure mais à moins de 24h", async () => {
+    // NOW = dim. 08h Paris ; 11h Paris LE JOUR MÊME (09:00 UTC) = heure pleine
+    // dans la plage MAIS à moins de 24h → refus.
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(
+        makeReq({ type: "particulier", startsAt: "2026-06-21T09:00:00.000Z" }),
+      ),
+    );
+    expect(res.status).toBe(400);
+    // On n'a même pas interrogé le freebusy (échec en amont).
+    expect(freeBusyQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 502 si le re-check freebusy jette (service indisponible)", async () => {
+    freeBusyQueryMock.mockRejectedValueOnce(new Error("Google freebusy 500"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(502);
+    expect(insertEventMock).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 500 si la lecture des tickets particuliers échoue (blip DB)", async () => {
+    serviceMock.queueResult("tickets", "select", {
+      data: null,
+      error: { message: "db timeout" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(500);
   });
 
   it("renvoie 402 (needsPurchase) sans ticket particulier", async () => {

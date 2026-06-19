@@ -102,6 +102,19 @@ describe("GET /api/cron", () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
   });
+
+  it("une passe attendance qui throw n'échoue PAS le cron (best-effort, erreurs signalées)", async () => {
+    process.env.CRON_SECRET = "abc";
+    scanMock.mockResolvedValue({ j1: 0, h2: 0 });
+    attendanceMock.mockRejectedValueOnce(new Error("attendance KO"));
+    const { GET } = await import("@/app/api/cron/route");
+    const res = await GET(req({ header: "abc" }));
+    // Les rappels (passe 1) ont réussi → 200 ; attendance remonte erreurs:1.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.attendance.erreurs).toBe(1);
+  });
 });
 
 describe("GET /api/cron — passe relance des inactifs", () => {

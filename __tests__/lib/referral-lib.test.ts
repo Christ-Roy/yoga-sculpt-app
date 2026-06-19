@@ -1,0 +1,304 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeSupabaseMock, type MockSupabase } from "../helpers/supabase-mock";
+
+/**
+ * Tests UNITAIRES de `src/lib/referral.ts` — garde-fous PROFONDS du parrainage
+ * (argent + anti-farming) non atteignables facilement via la route /completer :
+ *
+ *   - maxParrainagesCredites : parsing/validation de REFERRAL_MAX_CREDITS
+ *     (valeur saine adoptée, valeur douteuse → défaut sûr) ;
+ *   - genererCode : 8 chars, alphabet non ambigu ;
+ *   - getOrCreateCode : RETRY sur collision unique (23505) puis succès ;
+ *   - completerReferral :
+ *       · fail-safe DB sur résolution parrain (parrainErr) → credited:false ;
+ *       · fail-safe DB sur le comptage du plafond (countErr) → credited:false ;
+ *       · échec de crédit du ticket (crediterTicketParrain) → credited:false ;
+ *       · course concurrente sur le marquage (!marked) → rollback du ticket doublon
+ *         (delete tickets) + credited:false ;
+ *       · markErr (log mais crédit considéré fait) → credited:true.
+ *
+ * On mocke `canCreditReferral` (anti-abus) pour piloter la décision sans rejouer
+ * sa propre séquence DB (testée par anti-abuse.test.ts). Le client Supabase est le
+ * mock FIFO partagé.
+ */
+
+const canCreditMock = vi.fn();
+vi.mock("@/lib/anti-abuse", () => ({
+  canCreditReferral: (...args: unknown[]) => canCreditMock(...args),
+}));
+
+let service: MockSupabase;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  service = makeSupabaseMock(null);
+  canCreditMock.mockResolvedValue(true); // anti-abus OK par défaut
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+const PARRAIN = "parrain-1";
+const FILLEUL = "filleul-1";
+const CODE = "ABCD2345";
+
+/** Programme la séquence d'un crédit légitime JUSQU'À l'étape `untilStep`. */
+function queueResolution() {
+  // completerReferral → résolution parrain via code.
+  service.queueResult("profiles", "select", { data: { id: PARRAIN }, error: null });
+}
+
+describe("maxParrainagesCredites", () => {
+  it("adopte une surcharge entière positive valide", async () => {
+    vi.stubEnv("REFERRAL_MAX_CREDITS", "7");
+    const { maxParrainagesCredites } = await import("@/lib/referral");
+    expect(maxParrainagesCredites()).toBe(7);
+  });
+
+  it("retombe sur le défaut métier pour toute valeur douteuse", async () => {
+    const { PARRAINAGE_MAX_DEFAUT } = await import("@/lib/referral-config");
+    // NB : parseInt("2.5") = 2 (entier positif) → ACCEPTÉ, donc pas « douteux ».
+    // On ne teste ici que les valeurs réellement invalides.
+    for (const v of ["", "0", "-3", "abc", "  ", "x9"]) {
+      vi.stubEnv("REFERRAL_MAX_CREDITS", v);
+      vi.resetModules();
+      const { maxParrainagesCredites } = await import("@/lib/referral");
+      expect(maxParrainagesCredites()).toBe(PARRAINAGE_MAX_DEFAUT);
+    }
+  });
+});
+
+describe("genererCode", () => {
+  it("produit 8 caractères de l'alphabet non ambigu", async () => {
+    const { genererCode } = await import("@/lib/referral");
+    for (let i = 0; i < 50; i++) {
+      expect(genererCode()).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+    }
+  });
+});
+
+describe("getOrCreateCode — collision unique", () => {
+  it("régénère puis réussit après une collision 23505", async () => {
+    // 1) lecture profil : pas de code.
+    service.queueResult("profiles", "select", { data: { referral_code: null }, error: null });
+    // 2) 1er update → collision unique (code déjà pris).
+    service.queueResult("profiles", "update", {
+      data: null,
+      error: { code: "23505", message: "duplicate referral_code" },
+    });
+    // 3) 2e update → OK.
+    service.queueResult("profiles", "update", { data: null, error: null });
+    // 4) relecture → code posé.
+    service.queueResult("profiles", "select", {
+      data: { referral_code: "QRST6789" },
+      error: null,
+    });
+
+    const { getOrCreateCode } = await import("@/lib/referral");
+    const code = await getOrCreateCode(service.client as never, PARRAIN);
+    expect(code).toBe("QRST6789");
+    // Deux tentatives d'update (collision puis succès).
+    const updates = service.calls.filter(
+      (c) => c.table === "profiles" && c.op === "update",
+    );
+    expect(updates.length).toBe(2);
+  });
+
+  it("renvoie null si l'update échoue sur une erreur NON-unique (fail-safe)", async () => {
+    service.queueResult("profiles", "select", { data: { referral_code: null }, error: null });
+    service.queueResult("profiles", "update", {
+      data: null,
+      error: { message: "permission denied" },
+    });
+    const { getOrCreateCode } = await import("@/lib/referral");
+    expect(await getOrCreateCode(service.client as never, PARRAIN)).toBeNull();
+  });
+});
+
+describe("completerReferral — fail-safes & idempotence concurrente", () => {
+  const base = {
+    code: CODE,
+    filleulUserId: FILLEUL,
+    filleulEmail: "filleul@x.fr",
+    ip: null,
+    fingerprint: null,
+  };
+
+  it("credited:false si la résolution du parrain échoue (fail-safe DB)", async () => {
+    service.queueResult("profiles", "select", {
+      data: null,
+      error: { message: "db down" },
+    });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+  });
+
+  it("credited:false sur code vide après trim (court-circuit)", async () => {
+    const { completerReferral } = await import("@/lib/referral");
+    expect(
+      await completerReferral(service.client as never, { ...base, code: "   " }),
+    ).toEqual({ credited: false });
+  });
+
+  it("credited:false si le comptage du plafond échoue (countErr, fail-safe)", async () => {
+    queueResolution(); // parrain résolu
+    // pas de referral pending → recherche pending renvoie null.
+    service.queueResult("referrals", "select", { data: null, error: null });
+    // création du referral à la volée → id.
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    // comptage plafond → ERREUR DB.
+    service.queueResult("referrals", "select", {
+      data: null,
+      error: { message: "count failed" },
+      count: null,
+    });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    // Aucun ticket crédité (on a coupé avant).
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("credited:false si l'INSERT du ticket parrain échoue", async () => {
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null }); // pending absent
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null, count: 0 }); // plafond OK
+    // crédit ticket → ERREUR.
+    service.queueResult("tickets", "insert", {
+      data: null,
+      error: { message: "insert ticket failed" },
+    });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+  });
+
+  it("credited:true mais log si le marquage du referral échoue (markErr)", async () => {
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null, count: 0 });
+    service.queueResult("tickets", "insert", { data: null, error: null }); // ticket crédité
+    // marquage → erreur : le ticket est déjà inséré → on considère le crédit fait.
+    service.queueResult("referrals", "update", {
+      data: null,
+      error: { message: "update failed" },
+    });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: true,
+    });
+  });
+
+  it("course concurrente (!marked) → rollback du ticket doublon (delete) + credited:false", async () => {
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null, count: 0 });
+    service.queueResult("tickets", "insert", { data: null, error: null });
+    // marquage : 0 ligne (un appel concurrent a déjà marqué) → maybeSingle null.
+    service.queueResult("referrals", "update", { data: null, error: null });
+    // retirerDernierTicketParrainage : retrouve le ticket doublon…
+    service.queueResult("tickets", "select", { data: { id: "tk-dup" }, error: null });
+    // …puis le supprime.
+    service.queueResult("tickets", "delete", { data: null, error: null });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    // Le rollback a bien émis un delete sur tickets (compensation du doublon).
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "delete"),
+    ).toBeDefined();
+  });
+
+  it("credited:false si la création du referral à la volée échoue (createErr)", async () => {
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null }); // pas de pending
+    // insert referral → erreur (ou data null) → on s'arrête.
+    service.queueResult("referrals", "insert", {
+      data: null,
+      error: { message: "insert referral failed" },
+    });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("anti-abus refusé AVEC pending existant → rattache le filleul (update), aucun ticket", async () => {
+    canCreditMock.mockResolvedValue(false); // anti-abus REFUSE
+    service.queueResult("profiles", "select", { data: { id: PARRAIN }, error: null });
+    // lierFilleulSansCrediter : trouve un referral pending existant…
+    service.queueResult("referrals", "select", {
+      data: { id: "ref-pending" },
+      error: null,
+    });
+    // …et le met à jour (rattache le filleul_user_id).
+    service.queueResult("referrals", "update", { data: null, error: null });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    // Un update a bien rattaché le filleul (traçabilité), sans aucun ticket.
+    const upd = service.calls.find(
+      (c) => c.table === "referrals" && c.op === "update",
+    );
+    expect(upd?.payload).toMatchObject({ filleul_user_id: FILLEUL });
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("anti-auto-parrainage : le code résout vers le filleul → credited:false, aucun ticket", async () => {
+    service.queueResult("profiles", "select", { data: { id: FILLEUL }, error: null });
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+});
+
+describe("enregistrerSignaux", () => {
+  it("ne pose pas un null par-dessus une valeur déjà présente (merge non destructif)", async () => {
+    // Existant : IP déjà captée, fingerprint absent.
+    service.queueResult("account_signals", "select", {
+      data: { ip_creation: "1.2.3.4", device_fingerprint: null },
+      error: null,
+    });
+    service.queueResult("account_signals", "upsert", { data: null, error: null });
+
+    const { enregistrerSignaux } = await import("@/lib/referral");
+    // 2e appel : on apporte le fingerprint, sans IP → l'IP existante doit survivre.
+    await enregistrerSignaux(service.client as never, {
+      userId: FILLEUL,
+      ip: null,
+      fingerprint: "fp-xyz",
+    });
+
+    const upsert = service.calls.find(
+      (c) => c.table === "account_signals" && c.op === "upsert",
+    );
+    expect(upsert?.payload).toMatchObject({
+      user_id: FILLEUL,
+      ip_creation: "1.2.3.4", // préservée
+      device_fingerprint: "fp-xyz", // ajouté
+    });
+  });
+});
