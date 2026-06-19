@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { logEvent } from "@/lib/events";
+import { getUserGclid, recordAdsConversion } from "@/lib/ads-attribution";
 import { createLogger, serializeError } from "@/lib/log";
 
 const log = createLogger("webhook:stripe");
@@ -231,6 +232,22 @@ async function crediterTickets(session: StripeCheckoutSession): Promise<void> {
     },
     { source: "webhook:stripe", service: supabase },
   );
+
+  // ── ATTRIBUTION ADS — conversion PURCHASE (valeur = montant payé). ──────────
+  // Si ce user vient d'un clic Ads (gclid first-touch sur son profil), on
+  // enregistre la conversion à uploader à Google. Idempotent sur le session_id
+  // (un rejeu du webhook ne crée pas de doublon). Best-effort : ne casse pas le
+  // crédit ticket déjà réussi. L'upload réseau vers l'API Ads = 2e temps (cf todo).
+  if (montant && montant > 0) {
+    const gclid = await getUserGclid(supabase, userId);
+    await recordAdsConversion(supabase, {
+      userId,
+      kind: "purchase",
+      sourceRef: session.id,
+      gclid,
+      valueEur: montant,
+    });
+  }
 }
 
 export async function POST(request: Request) {
