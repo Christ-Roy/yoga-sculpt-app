@@ -60,3 +60,28 @@ Le vrai garde-fou reste le levier #1 (séance honorée).
 `src/lib/anti-abuse.ts`, `src/lib/referral.ts` (TODO posé après le check plafond),
 `src/lib/fingerprint.ts`, `src/components/FingerprintCollector.tsx`,
 `src/app/api/parrainage/completer/route.ts`, `src/app/api/parrainage/route.ts`.
+
+---
+
+## ⚠️ Vecteur supplémentaire (constaté 2026-06-19) — parrainer un COMPTE DÉJÀ EXISTANT
+
+`completerReferral` est appelé au callback auth (à CHAQUE connexion qui porte le cookie
+`ys_ref`), pas seulement à la création de compte. Il n'y a **aucune garde "le filleul doit
+être un nouvel inscrit"**. Donc un **compte déjà existant** qui clique sur un lien `?ref=CODE`
+et se reconnecte → le parrain EST crédité (s'il n'a jamais été filleul, R4) — alors qu'aucune
+acquisition réelle n'a eu lieu.
+
+Conséquences :
+- Cas bénin : un client déjà inscrit suit le lien d'un ami → l'ami gagne un ticket sans
+  amener un nouveau membre.
+- Cas abusif : faire cliquer ses contacts déjà clients sur son lien → farm de tickets sans
+  acquisition. R4 (1 crédit/filleul à vie) + cap par parrain limitent, mais ne ferment pas.
+
+### Fix (recoupe le levier déjà recommandé)
+Le levier "**créditer après la 1ère séance HONORÉE du filleul**" (au lieu de l'inscription)
+ferme aussi CE cas : un compte existant qui ne vient pas en cours ne rapporte rien. À défaut,
+ajouter une garde "filleul = compte créé récemment / jamais réservé avant le clic ref" dans
+`completerReferral` (ex. refuser si `profiles.created_at` du filleul est antérieur au dépôt
+du cookie ref, ou s'il a déjà des bookings). À trancher : faut-il autoriser le parrainage
+d'un compte existant qui n'a jamais réservé (cas légitime : ami inscrit mais jamais venu) ?
+Reco : créditer à la séance honorée tranche proprement sans avoir à décider de l'âge du compte.
