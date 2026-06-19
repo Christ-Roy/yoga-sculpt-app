@@ -16,6 +16,10 @@
  * paiement, ni le parrainage. Écritures via service_role uniquement.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { readAdsEnv, uploadClickConversion } from "@/lib/google-ads";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("ads-attribution");
 
 /** Forme du cookie ys_gclid posé par la vitrine (JSON encodé). */
 export interface GclidPayload {
@@ -134,4 +138,99 @@ export async function getUserGclid(
   } catch {
     return null;
   }
+}
+
+/**
+ * Mappe un kind de conversion vers le resource name de sa conversion action
+ * Google Ads (créée sur le compte, son resource name mis en env). null si non
+ * configuré → on n'uploade pas (on laisse la ligne pending, pas d'erreur).
+ */
+function conversionActionFor(
+  kind: AdsConversionKind,
+  env: Record<string, string | undefined>,
+): string | null {
+  switch (kind) {
+    case "purchase":
+      return env.ADS_CONV_ACTION_PURCHASE ?? null;
+    case "referral_value":
+      return env.ADS_CONV_ACTION_REFERRAL ?? null;
+    case "free_ticket_used":
+      return env.ADS_CONV_ACTION_FREE_TICKET ?? null;
+  }
+}
+
+interface DrainResult {
+  uploaded: number;
+  failed: number;
+  skipped: number;
+}
+
+/**
+ * Draine le journal ads_conversions : pousse à Google Ads les conversions
+ * pending (uploaded=false) qui ont un gclid + une conversion action configurée,
+ * et marque le résultat. Idempotent : une ligne uploadée n'est jamais re-tentée.
+ * Appelé par un cron (ou en best-effort après écriture). Ne throw jamais — agrège.
+ *
+ * @param env  process.env (secrets Ads + resource names des conversion actions).
+ * @param limit nb max de conversions traitées par run.
+ */
+export async function drainAdsConversions(
+  service: SupabaseClient,
+  env: Record<string, string | undefined>,
+  limit = 50,
+): Promise<DrainResult> {
+  const result: DrainResult = { uploaded: 0, failed: 0, skipped: 0 };
+  const adsEnv = readAdsEnv(env);
+  if (!adsEnv) {
+    log.warn("Config Google Ads incomplète — drain ignoré");
+    return result;
+  }
+
+  const { data: pending, error } = await service
+    .from("ads_conversions")
+    .select("id, user_id, kind, source_ref, gclid, value_eur, created_at")
+    .eq("uploaded", false)
+    .not("gclid", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    log.error("Lecture ads_conversions pending échouée", { db: error.message });
+    return result;
+  }
+  if (!pending || pending.length === 0) return result;
+
+  for (const row of pending) {
+    const action = conversionActionFor(row.kind as AdsConversionKind, env);
+    if (!action) {
+      // Conversion action non configurée pour ce kind → on saute (pas d'erreur).
+      result.skipped++;
+      continue;
+    }
+    try {
+      await uploadClickConversion(adsEnv, {
+        gclid: row.gclid as string,
+        conversionActionResourceName: action,
+        conversionDateTimeIso: row.created_at as string,
+        valueEur: Number(row.value_eur),
+      });
+      await service
+        .from("ads_conversions")
+        .update({ uploaded: true, uploaded_at: new Date().toISOString(), upload_error: null })
+        .eq("id", row.id);
+      result.uploaded++;
+    } catch (err) {
+      // On persiste l'erreur sur la ligne (reste pending → re-tentée au prochain run).
+      await service
+        .from("ads_conversions")
+        .update({ upload_error: serializeError(err).message ?? "upload échoué" })
+        .eq("id", row.id);
+      log.error("Upload conversion Ads échoué", {
+        id: row.id, kind: row.kind, err: serializeError(err),
+      });
+      result.failed++;
+    }
+  }
+  log.info("Drain ads_conversions terminé", { ...result });
+  return result;
 }
