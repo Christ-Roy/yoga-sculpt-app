@@ -47,7 +47,8 @@ export type EventType =
   | "referral_blocked"
   | "booking_created"
   | "booking_cancelled"
-  | "booking_attended";
+  | "booking_attended"
+  | "reactivation_sent";
 
 /** Métadonnées libres d'un event (sérialisables en JSONB). */
 export type EventMetadata = Record<string, unknown>;

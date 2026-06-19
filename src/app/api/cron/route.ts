@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { scanAndSendReminders } from "@/lib/reminders";
 import { markPastBookingsAttended } from "@/lib/attendance";
+import { scanAndSendRelances } from "@/lib/relance";
 
 /**
  * GET /api/cron — déclencheur des rappels mail automatiques (J-1 / H-2).
@@ -84,12 +85,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Deux passes indépendantes au même tick :
-    //   1. Rappels mail J-1 / H-2 (existant).
+    // Trois passes indépendantes au même tick :
+    //   1. Rappels mail J-1 / H-2 (avant un cours DÉJÀ réservé).
     //   2. Émission des events booking_attended pour les séances passées
     //      (tracking timeline ; le compteur de séances reste dérivé de bookings).
-    // La passe attendance est best-effort et ne doit pas faire échouer les
-    // rappels (ni l'inverse) : on l'isole dans son propre try/catch.
+    //   3. Relance des INACTIFS (rétention : ceux qui n'ont RIEN de prévu —
+    //      jamais réservé / dormant / ticket dormant). cf. src/lib/relance.ts.
+    // Chaque passe est best-effort et ne doit pas faire échouer les autres :
+    // on isole les passes 2 et 3 dans leur propre try/catch.
     const resultat = await scanAndSendReminders();
 
     let attendance;
@@ -100,7 +103,20 @@ export async function GET(request: Request) {
       attendance = { marquees: 0, erreurs: 1 };
     }
 
-    return NextResponse.json({ ok: true, ...resultat, attendance });
+    let relances;
+    try {
+      relances = await scanAndSendRelances();
+    } catch (relErr) {
+      console.error("[cron] Passe relances échouée (rappels OK) :", relErr);
+      relances = {
+        jamaisReserve: 0,
+        dormant: 0,
+        ticketDormant: 0,
+        erreurs: 1,
+      };
+    }
+
+    return NextResponse.json({ ok: true, ...resultat, attendance, relances });
   } catch (err) {
     // scanAndSendReminders agrège déjà les erreurs d'envoi ; un throw ici =
     // défaillance plus profonde (client Supabase indisponible, etc.).
