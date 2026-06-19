@@ -200,7 +200,24 @@ export async function drainAdsConversions(
   }
   if (!pending || pending.length === 0) return result;
 
+  // ── GARDE-FOU ENVIRONNEMENT DE TEST ────────────────────────────────────────
+  // Sur staging (ADS_TEST_MODE=true), les creds Ads pointent la VRAIE campagne
+  // (customer 6478938833). Pour ne JAMAIS créer de fausse conversion attribuée à
+  // un vrai clic depuis l'env de test, on n'uploade QUE les gclid de test
+  // (préfixe TEST_). Un vrai gclid sur staging est sauté, jamais envoyé à Google.
+  // En prod, ADS_TEST_MODE est absent → comportement normal (tout est uploadé).
+  const testMode =
+    env.ADS_TEST_MODE === "true" || env.ADS_TEST_MODE === "1";
+
   for (const row of pending) {
+    if (testMode && !String(row.gclid).startsWith("TEST_")) {
+      // Env de test : on refuse tout vrai gclid (anti-fausse-conversion live).
+      log.warn("ADS_TEST_MODE : gclid réel ignoré sur staging (non uploadé)", {
+        id: row.id, kind: row.kind,
+      });
+      result.skipped++;
+      continue;
+    }
     const action = conversionActionFor(row.kind as AdsConversionKind, env);
     if (!action) {
       // Conversion action non configurée pour ce kind → on saute (pas d'erreur).
