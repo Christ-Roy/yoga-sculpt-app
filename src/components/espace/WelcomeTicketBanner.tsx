@@ -30,7 +30,7 @@ export function WelcomeTicketBanner() {
         </div>
         <Link
           href="/espace/parrainer"
-          className="btn-cta-glow w-full shrink-0 sm:w-auto sm:flex-none"
+          className="btn-cta-glow max-sm:w-full sm:flex-[0_0_auto]"
           aria-label="Récupérer mes séances offertes en parrainant"
         >
           <Gift className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
