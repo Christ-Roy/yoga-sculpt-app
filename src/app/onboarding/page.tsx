@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { AuthBackground } from "@/components/AuthBackground";
 import { OnboardingFlow } from "./OnboardingFlow";
 
 export const metadata: Metadata = {
@@ -45,8 +46,11 @@ export default async function OnboardingPage() {
   };
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-5 py-12">
-      <OnboardingFlow firstName={firstName} prefill={prefill} />
+    <main className="relative flex min-h-dvh items-center justify-center px-5 py-12">
+      <AuthBackground />
+      <div className="relative z-10 w-full flex justify-center">
+        <OnboardingFlow firstName={firstName} prefill={prefill} />
+      </div>
     </main>
   );
 }

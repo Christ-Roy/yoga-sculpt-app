@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { Share2, Check } from "lucide-react";
+import { Share2, Check, Copy } from "lucide-react";
 import { InviteAmiForm } from "@/components/InviteAmiForm";
 
 /**
@@ -158,56 +158,73 @@ export function ShareInvitation({
     }
   }
 
-  const labelBouton = canNativeShare
-    ? "Partager mon lien"
-    : copie
-      ? "Lien copié ✓"
-      : "Copier mon lien";
+  /** Copie pure (bouton secondaire) + retour visuel. */
+  async function copierSeul() {
+    const ok = await copierLien();
+    if (ok) {
+      setCopie(true);
+      window.setTimeout(() => setCopie(false), 2500);
+      trackerPartage();
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Bouton de partage principal — visible partout. */}
-      <div>
-        <button
-          type="button"
-          onClick={() => void partager()}
-          className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-auto"
-          aria-label={
-            canNativeShare
-              ? "Partager mon lien de parrainage"
-              : "Copier mon lien de parrainage"
-          }
-        >
-          {copie ? (
-            <Check className="size-4" aria-hidden="true" />
-          ) : (
-            <Share2 className="size-4" aria-hidden="true" />
-          )}
-          {labelBouton}
-        </button>
-        {/* Annonce lecteur d'écran : confirmation de copie sans voler le focus. */}
-        <span className="sr-only" role="status" aria-live="polite">
-          {copie ? "Lien copié dans le presse-papiers." : ""}
-        </span>
-      </div>
+    <div className="flex flex-col gap-3">
+      {/* 1) PRINCIPAL — Partager le lien (feuille native sur mobile). */}
+      <button
+        type="button"
+        onClick={() => void partager()}
+        className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-3 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Partager mon lien de parrainage"
+      >
+        <Share2 className="size-4" aria-hidden="true" />
+        Partager le lien de parrainage
+      </button>
 
-      {/* Inviter par e-mail (Brevo). Déplié d'emblée sur desktop ; sur mobile,
-          repliable derrière un toggle (le partage natif y est privilégié). */}
+      {/* 2) SECONDAIRE — Copier le lien. */}
+      <button
+        type="button"
+        onClick={() => void copierSeul()}
+        className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[4px] border border-border bg-surface px-5 py-2.5 text-sm text-text transition-colors hover:border-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Copier mon lien de parrainage"
+      >
+        {copie ? (
+          <Check className="size-4 text-accent" aria-hidden="true" />
+        ) : (
+          <Copy className="size-4" aria-hidden="true" />
+        )}
+        {copie ? "Lien copié ✓" : "Copier le lien"}
+      </button>
+
+      {/* Lien en clair : toujours visible (transparence) + dernier recours si la
+          copie auto / le partage natif ne sont pas dispos (desktop, contexte non
+          sécurisé). Clic = sélectionne tout le texte pour copie manuelle. */}
+      <input
+        type="text"
+        readOnly
+        value={lienParrainage}
+        onFocus={(e) => e.currentTarget.select()}
+        onClick={(e) => e.currentTarget.select()}
+        className="w-full select-all truncate rounded-[4px] border border-border bg-surface-2 px-3 py-2 text-center text-xs text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Votre lien de parrainage"
+      />
+      <span className="sr-only" role="status" aria-live="polite">
+        {copie ? "Lien copié dans le presse-papiers." : ""}
+      </span>
+
+      {/* 3) DERNIER — Envoyer par e-mail (repliable). */}
       {emailOuvert ? (
         <section
           aria-labelledby={compact ? undefined : "share-email-title"}
-          className="border-t border-border pt-4"
+          className="mt-1 border-t border-border pt-3"
         >
           {!compact && (
-            <h3
-              id="share-email-title"
-              className="font-display text-base text-text"
-            >
-              Inviter par e-mail
+            <h3 id="share-email-title" className="font-display text-base text-text">
+              Envoyer par e-mail
             </h3>
           )}
           <p className="mb-3 text-sm leading-relaxed text-text-secondary">
-            Nous enverrons à votre ami une invitation avec votre lien.
+            Nous enverrons à votre ami(e) une invitation avec votre lien.
           </p>
           <InviteAmiForm onInvite={onInvite} />
         </section>
@@ -215,9 +232,9 @@ export function ShareInvitation({
         <button
           type="button"
           onClick={() => setEmailOuvertManuel(true)}
-          className="self-start text-sm text-accent underline-offset-2 transition-colors hover:text-accent-dark hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="text-center text-sm text-accent underline-offset-2 transition-colors hover:text-accent-dark hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          Plutôt inviter par e-mail
+          Envoyer par e-mail
         </button>
       )}
     </div>

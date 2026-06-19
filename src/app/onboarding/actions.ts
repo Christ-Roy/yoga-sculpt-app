@@ -1,20 +1,16 @@
 "use server";
 
 import { z } from "zod";
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentUser } from "@/lib/auth";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
 import { logEvent } from "@/lib/events";
-import { getClientIpFromHeaders } from "@/lib/anti-abuse";
-import { grantWelcomeTicket } from "@/lib/welcome-ticket";
 
 const answersSchema = z.object({
   goal: z.string().min(1).max(64),
   level: z.string().min(1).max(64),
-  frequency: z.string().min(1).max(64),
   availability: z.string().min(1).max(64),
+  format: z.string().min(1).max(64),
 });
 
 /** Valeurs autorisées par question (anti-injection : on n'accepte que la liste connue). */
@@ -37,14 +33,14 @@ export async function saveOnboarding(
     return { ok: false, error: "Réponses incomplètes." };
   }
 
-  const { goal, level, frequency, availability } = parsed.data;
+  const { goal, level, availability, format } = parsed.data;
 
   // Validation stricte des valeurs contre la liste autorisée.
   if (
     !isAllowed("goal", goal) ||
     !isAllowed("level", level) ||
-    !isAllowed("frequency", frequency) ||
-    !isAllowed("availability", availability)
+    !isAllowed("availability", availability) ||
+    !isAllowed("format", format)
   ) {
     return { ok: false, error: "Réponse invalide." };
   }
@@ -62,8 +58,8 @@ export async function saveOnboarding(
       user_id: user.id,
       goal,
       level,
-      frequency,
       availability,
+      format,
     });
 
   if (insertError) {
@@ -85,31 +81,13 @@ export async function saveOnboarding(
   await logEvent(
     user.id,
     "onboarding_completed",
-    { goal, level, frequency, availability },
+    { goal, level, availability, format },
     { source: "onboarding" },
   );
 
-  // ── Ticket de bienvenue (« 1ère séance offerte » — pivot Essai gratuit). ────
-  // À la 1ère complétion d'onboarding, on crédite 1 ticket collectif offert.
-  // Idempotent (flag profil + index unique DB), anti-abus (e-mail jetable /
-  // IP / fingerprint partagés) et SILENCIEUX en cas de refus. BEST-EFFORT :
-  // toute erreur est avalée — ne JAMAIS faire échouer l'onboarding pour ça
-  // (le métier — réponses + onboarding_completed — est déjà persisté).
-  try {
-    const service = createServiceClient();
-    const ip = getClientIpFromHeaders(await headers());
-    await grantWelcomeTicket(service, {
-      userId: user.id,
-      email: user.email ?? "",
-      ip,
-      // Fingerprint indisponible dans une Server Action (collecté côté client,
-      // poussé via /api/parrainage/completer au login). L'IP + l'e-mail jetable
-      // restent les signaux portants ici.
-      fingerprint: null,
-    });
-  } catch (welcomeErr) {
-    console.error("[onboarding] Ticket de bienvenue best-effort échoué :", welcomeErr);
-  }
+  // NB : AUCUN ticket offert par défaut à l'inscription/onboarding.
+  // Les seuls tickets gratuits proviennent du PARRAINAGE (le parrain est crédité
+  // 1 ticket par filleul, plafond 3). Décision Robert 2026-06-19.
 
   return { ok: true };
 }

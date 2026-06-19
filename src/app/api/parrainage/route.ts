@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getOrCreateCode } from "@/lib/referral";
 
@@ -31,11 +32,9 @@ import { getOrCreateCode } from "@/lib/referral";
  * Runtime edge (Cloudflare Workers).
  */
 export async function GET() {
-  // ── Auth ──────────────────────────────────────────────────────────────────
+  // ── Auth (getCurrentUser → respecte le bypass dev pour tester en local) ─────
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser(supabase);
   if (!user) {
     return NextResponse.json(
       { error: "Authentification requise." },

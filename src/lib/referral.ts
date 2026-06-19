@@ -291,6 +291,23 @@ export async function completerReferral(
     referralId = created.id as string;
   }
 
+  // 5bis) PLAFOND : un parrain est crédité au maximum 3 fois (1 ticket par
+  // filleul, jusqu'à 3 filleuls). Au-delà, on lie le filleul pour la traçabilité
+  // mais on ne crédite plus. (count exact via head:true)
+  const { count: dejaCredites, error: countErr } = await service
+    .from("referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("parrain_user_id", parrainUserId)
+    .eq("ticket_credite", true);
+  if (countErr) {
+    console.error("[referral] Comptage plafond parrain échoué :", countErr.message);
+    return { credited: false };
+  }
+  if ((dejaCredites ?? 0) >= 3) {
+    // Plafond atteint : on ne crédite plus, mais le filleul reste rattaché.
+    return { credited: false };
+  }
+
   // 6) Créditer le ticket au parrain, PUIS marquer le referral (ordre choisi
   // pour ne jamais marquer « crédité » sans ticket réel). On verrouille la
   // marque par `ticket_credite = false` pour rester idempotent face à un appel

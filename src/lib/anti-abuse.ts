@@ -192,18 +192,21 @@ export async function canCreditReferral(
   // null ne doit jamais matcher (sinon tous les comptes sans signal seraient
   // « doublons » entre eux → faux positifs massifs).
   if (ip) {
+    // R2 — limite à 2 comptes par IP : une même maison (colocs / famille,
+    // même IP publique) doit pouvoir se parrainer. On REFUSE seulement à partir
+    // du 3e compte, soit quand ≥ 2 AUTRES comptes partagent déjà cette IP.
     const { data: ipDup, error: ipErr } = await service
       .from("account_signals")
       .select("user_id")
       .eq("ip_creation", ip)
       .neq("user_id", filleulUserId)
-      .limit(1);
+      .limit(2);
     if (ipErr) {
       console.error("[anti-abuse] Lecture account_signals IP (R2) échouée :", ipErr.message);
       return false;
     }
-    if (ipDup && ipDup.length > 0) {
-      return false; // R2 : même IP qu'un autre compte → suspect.
+    if (ipDup && ipDup.length >= 2) {
+      return false; // R2 : 3e compte (ou +) sur la même IP → suspect.
     }
   }
 
