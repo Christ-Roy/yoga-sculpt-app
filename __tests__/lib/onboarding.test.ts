@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { onboardingLabel, ONBOARDING_STEPS } from "@/lib/onboarding";
+import {
+  onboardingLabel,
+  ONBOARDING_STEPS,
+  isAllowedOnboardingValue,
+  sanitizeOnboardingDraft,
+} from "@/lib/onboarding";
 
 /**
  * Tests de src/lib/onboarding.ts — mapping value → label du questionnaire.
@@ -36,6 +41,7 @@ describe("onboardingLabel", () => {
 
 describe("ONBOARDING_STEPS — cohérence du barème", () => {
   it("expose exactement les 4 étapes attendues, dans l'ordre", () => {
+    // Migration 0013 : "frequency" → "format" (split). Cf src/lib/onboarding.ts.
     expect(ONBOARDING_STEPS.map((s) => s.key)).toEqual([
       "goal",
       "level",
@@ -55,5 +61,80 @@ describe("ONBOARDING_STEPS — cohérence du barème", () => {
       const values = step.options.map((o) => o.value);
       expect(new Set(values).size).toBe(values.length);
     }
+  });
+});
+
+describe("isAllowedOnboardingValue — anti-injection", () => {
+  it("accepte une value présente dans le barème", () => {
+    expect(isAllowedOnboardingValue("goal", "renforcement")).toBe(true);
+    expect(isAllowedOnboardingValue("format", "les_deux")).toBe(true);
+  });
+
+  it("refuse une value inconnue, un mauvais type, une value d'une autre étape", () => {
+    expect(isAllowedOnboardingValue("goal", "inexistant")).toBe(false);
+    expect(isAllowedOnboardingValue("goal", 42)).toBe(false);
+    expect(isAllowedOnboardingValue("goal", null)).toBe(false);
+    expect(isAllowedOnboardingValue("goal", undefined)).toBe(false);
+    // "matin" est valide pour availability, pas pour goal.
+    expect(isAllowedOnboardingValue("goal", "matin")).toBe(false);
+  });
+});
+
+describe("sanitizeOnboardingDraft — brouillon de reprise", () => {
+  it("ne conserve QUE les valeurs connues du barème", () => {
+    expect(
+      sanitizeOnboardingDraft({
+        goal: "renforcement",
+        level: "debutant",
+        availability: "matin",
+        format: "collectif",
+      }),
+    ).toEqual({
+      goal: "renforcement",
+      level: "debutant",
+      availability: "matin",
+      format: "collectif",
+    });
+  });
+
+  it("ignore silencieusement les valeurs invalides / inconnues / mauvais types", () => {
+    expect(
+      sanitizeOnboardingDraft({
+        goal: "renforcement",
+        level: "DROP TABLE",
+        availability: 123,
+        format: null,
+        intrus: "x",
+      }),
+    ).toEqual({ goal: "renforcement" });
+  });
+
+  it("valide la phase contre la liste autorisée", () => {
+    expect(sanitizeOnboardingDraft({ phase: "invite" })).toEqual({
+      phase: "invite",
+    });
+    expect(sanitizeOnboardingDraft({ phase: "final" })).toEqual({
+      phase: "final",
+    });
+    expect(sanitizeOnboardingDraft({ phase: "bidon" })).toEqual({});
+  });
+
+  it("borne stepIndex dans [0, nbQuestions-1] et exige un entier", () => {
+    const max = ONBOARDING_STEPS.length - 1;
+    expect(sanitizeOnboardingDraft({ stepIndex: 2 })).toEqual({ stepIndex: 2 });
+    expect(sanitizeOnboardingDraft({ stepIndex: -5 })).toEqual({ stepIndex: 0 });
+    expect(sanitizeOnboardingDraft({ stepIndex: 999 })).toEqual({
+      stepIndex: max,
+    });
+    // non-entier ignoré
+    expect(sanitizeOnboardingDraft({ stepIndex: 1.5 })).toEqual({});
+  });
+
+  it("entrées non-objet → {} (best-effort, jamais de throw)", () => {
+    expect(sanitizeOnboardingDraft(null)).toEqual({});
+    expect(sanitizeOnboardingDraft(undefined)).toEqual({});
+    expect(sanitizeOnboardingDraft("nope")).toEqual({});
+    expect(sanitizeOnboardingDraft(42)).toEqual({});
+    expect(sanitizeOnboardingDraft([])).toEqual({});
   });
 });

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { AuthBackground } from "@/components/AuthBackground";
+import { sanitizeOnboardingDraft } from "@/lib/onboarding";
 import { OnboardingFlow } from "./OnboardingFlow";
 
 export const metadata: Metadata = {
@@ -20,7 +21,7 @@ export default async function OnboardingPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("onboarding_completed, full_name, email, phone")
+    .select("onboarding_completed, full_name, email, phone, onboarding_draft")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -28,6 +29,10 @@ export default async function OnboardingPage() {
   if (profile?.onboarding_completed) {
     redirect("/espace");
   }
+
+  // Brouillon de reprise (re-sanitizé côté serveur : on ne fait pas confiance
+  // au contenu brut de la colonne jsonb même s'il vient de chez nous).
+  const initialDraft = sanitizeOnboardingDraft(profile?.onboarding_draft);
 
   const fullName =
     profile?.full_name?.trim() ||
@@ -46,10 +51,14 @@ export default async function OnboardingPage() {
   };
 
   return (
-    <main className="relative flex min-h-dvh items-center justify-center px-5 py-12">
+    <main className="relative flex min-h-dvh items-center justify-center px-5 py-6 sm:py-12">
       <AuthBackground />
       <div className="relative z-10 w-full flex justify-center">
-        <OnboardingFlow firstName={firstName} prefill={prefill} />
+        <OnboardingFlow
+          firstName={firstName}
+          prefill={prefill}
+          initialDraft={initialDraft}
+        />
       </div>
     </main>
   );

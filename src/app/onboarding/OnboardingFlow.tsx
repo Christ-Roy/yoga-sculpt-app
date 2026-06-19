@@ -28,8 +28,8 @@ import { Logo } from "@/components/Logo";
 import { Button } from "@/components/Button";
 import { ShareInvitation } from "@/components/ShareInvitation";
 import { TicketIcon } from "@/components/TicketIcon";
-import { ONBOARDING_STEPS } from "@/lib/onboarding";
-import { saveOnboarding } from "./actions";
+import { ONBOARDING_STEPS, type OnboardingDraft } from "@/lib/onboarding";
+import { saveOnboarding, saveOnboardingProgress } from "./actions";
 
 /** Mapping nom d'icône (lib/onboarding) → composant lucide. */
 const ICONS: Record<string, LucideIcon> = {
@@ -62,19 +62,38 @@ type BookingPrefill = {
   phone?: string | null;
 };
 
+/** Réponses (state) reconstruites depuis un brouillon de reprise. */
+function answersFromDraft(draft?: OnboardingDraft | null): Answers {
+  const a: Answers = {};
+  if (!draft) return a;
+  for (const key of ["goal", "level", "availability", "format"] as const) {
+    const v = draft[key];
+    if (v) a[key] = v;
+  }
+  return a;
+}
+
 export function OnboardingFlow({
   firstName,
   prefill,
+  initialDraft,
 }: {
   firstName?: string | null;
   prefill: BookingPrefill;
+  /** Brouillon de reprise chargé côté serveur (profiles.onboarding_draft). */
+  initialDraft?: OnboardingDraft | null;
 }) {
   const router = useRouter();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [answers, setAnswers] = useState<Answers>({});
+  // Index de la question courante — repris du brouillon (déjà borné côté serveur).
+  const [stepIndex, setStepIndex] = useState(
+    () => initialDraft?.stepIndex ?? 0,
+  );
+  const [answers, setAnswers] = useState<Answers>(() =>
+    answersFromDraft(initialDraft),
+  );
   // phase du flow : "questions" (étapes 1-4) → "invite" (5) → "final" (6).
   const [phase, setPhase] = useState<"questions" | "invite" | "final">(
-    "questions",
+    () => initialDraft?.phase ?? "questions",
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
@@ -111,6 +130,15 @@ export function OnboardingFlow({
         : TOTAL_ETAPES; // 6
   const progress = Math.round((etapeAffichee / TOTAL_ETAPES) * 100);
 
+  /**
+   * Sauvegarde BEST-EFFORT du brouillon (reprise). Fire-and-forget : on n'attend
+   * jamais le résultat, on avale toute erreur — la reprise est un confort, pas un
+   * bloquant de l'UX.
+   */
+  function persistDraft(draft: OnboardingDraft) {
+    void saveOnboardingProgress(draft).catch(() => {});
+  }
+
   function select(value: string) {
     setError(null);
     const next = { ...answers, [step.key]: value };
@@ -118,8 +146,13 @@ export function OnboardingFlow({
 
     if (!isLastQuestion) {
       // Petite respiration avant de passer à la question suivante.
+      const nextStep = safeIndex + 1;
+      persistDraft({ ...next, phase: "questions", stepIndex: nextStep });
       window.setTimeout(() => setStepIndex((i) => i + 1), 220);
     } else {
+      // Dernière question : on persiste avant la soumission finale (au cas où
+      // saveOnboarding échouerait, la réponse n'est pas perdue).
+      persistDraft({ ...next, phase: "questions", stepIndex: safeIndex });
       submit(next);
     }
   }
@@ -137,11 +170,18 @@ export function OnboardingFlow({
     startSaving(async () => {
       const res = await saveOnboarding(finalAnswers);
       if (res.ok) {
+        // saveOnboarding a nettoyé le brouillon (onboarding_completed=true) :
+        // on ne re-persiste PAS de draft ici, on avance juste l'écran.
         setPhase("invite"); // → étape 5 : inviter un ami
       } else {
         setError(res.error ?? "Une erreur est survenue.");
       }
     });
+  }
+
+  /** Passage à l'écran final (parrainage → "C'est parti"). */
+  function goToFinal() {
+    setPhase("final");
   }
 
   function back() {
@@ -151,8 +191,8 @@ export function OnboardingFlow({
 
   // En-tête commun (logo + barre de progression + "Étape X / 6").
   const Header = (
-    <div className="mb-8">
-      <div className="mb-5 flex items-center justify-between">
+    <div className="mb-6 sm:mb-8">
+      <div className="mb-4 flex items-center justify-between sm:mb-5">
         <Logo title="Yoga Sculpt — onboarding" />
         <span className="text-xs uppercase tracking-widest text-text-secondary">
           Étape {etapeAffichee} / {TOTAL_ETAPES}
@@ -173,14 +213,14 @@ export function OnboardingFlow({
       <div className="w-full max-w-lg sm:max-w-2xl animate-fade-in-up">
         {Header}
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <Gift className="h-6 w-6" strokeWidth={1.7} aria-hidden />
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-accent sm:h-12 sm:w-12">
+            <Gift className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.7} aria-hidden />
           </span>
-          <h1 className="font-display text-3xl text-text sm:text-4xl">
+          <h1 className="font-display text-2xl text-text sm:text-4xl">
             Parrainez vos ami(e)s
           </h1>
         </div>
-        <p className="mt-4 text-sm leading-relaxed text-text-secondary sm:text-base">
+        <p className="mt-3 text-sm leading-relaxed text-text-secondary sm:mt-4 sm:text-base">
           <span className="text-accent">
             Gagnez une séance gratuite pour chaque ami(e) qui crée son compte
           </span>{" "}
@@ -190,7 +230,7 @@ export function OnboardingFlow({
         </p>
 
         {/* Les 3 tickets à gagner (mini-tickets sur une ligne) */}
-        <div className="mt-5 flex items-center gap-2">
+        <div className="mt-4 flex items-center gap-2 sm:mt-5">
           {[0, 1, 2].map((i) => (
             <TicketIcon key={i} type="collectif" />
           ))}
@@ -199,7 +239,7 @@ export function OnboardingFlow({
           </span>
         </div>
 
-        <div className="mt-7">
+        <div className="mt-5 sm:mt-7">
           {lienParrainage ? (
             <ShareInvitation lienParrainage={lienParrainage} />
           ) : (
@@ -209,13 +249,13 @@ export function OnboardingFlow({
           )}
         </div>
 
-        <div className="mt-8 flex flex-col gap-3">
-          <Button onClick={() => setPhase("final")} className="w-full">
+        <div className="mt-6 flex flex-col gap-3 sm:mt-8">
+          <Button onClick={goToFinal} className="w-full">
             Continuer
           </Button>
           <button
             type="button"
-            onClick={() => setPhase("final")}
+            onClick={goToFinal}
             className="text-sm text-text-secondary transition-colors hover:text-text"
           >
             Plus tard
@@ -230,21 +270,21 @@ export function OnboardingFlow({
     return (
       <div className="w-full max-w-lg sm:max-w-2xl animate-fade-in-up">
         {Header}
-        <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+        <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-accent sm:mb-6 sm:h-12 sm:w-12">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <h1 className="font-display text-3xl text-text sm:text-4xl">
+        <h1 className="font-display text-2xl text-text sm:text-4xl">
           C&apos;est parti{firstName ? `, ${firstName}` : ""} !
         </h1>
-        <p className="mt-3 text-sm leading-relaxed text-text-secondary sm:text-base">
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary sm:mt-3 sm:text-base">
           Votre profil est prêt. Prenez votre premier ticket pour réserver une
           séance, ou explorez votre espace.
         </p>
 
         {/* Prendre un ticket → Stripe (collectif ou particulier) */}
-        <div className="mt-7 grid gap-3 sm:grid-cols-2">
+        <div className="mt-5 grid gap-3 sm:mt-7 sm:grid-cols-2">
           <a
             href="/checkout?formule=collectif"
             className="group flex items-center justify-between rounded-[4px] border border-accent bg-accent/10 px-5 py-4 transition-colors hover:bg-accent/15"
@@ -271,7 +311,7 @@ export function OnboardingFlow({
           </a>
         </div>
 
-        <div className="mt-6 flex flex-col gap-3">
+        <div className="mt-5 flex flex-col gap-3 sm:mt-6">
           <Button
             variant="ghost"
             onClick={() => router.push("/espace")}
@@ -291,11 +331,11 @@ export function OnboardingFlow({
 
       {/* Question (re-montée à chaque étape via key → animation) */}
       <div key={step.key} className="animate-fade-in-up">
-        <h1 className="font-display text-3xl leading-tight text-text sm:text-4xl lg:text-5xl">
+        <h1 className="font-display text-2xl leading-tight text-text sm:text-4xl lg:text-5xl">
           {step.question}
         </h1>
         {step.subtitle && (
-          <p className="mt-3 text-sm text-text-secondary sm:text-base">
+          <p className="mt-2 text-sm text-text-secondary sm:mt-3 sm:text-base">
             {step.subtitle}
           </p>
         )}
@@ -308,7 +348,7 @@ export function OnboardingFlow({
             onSelect={select}
           />
         ) : (
-        <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:gap-4">
+        <div className="mt-6 flex flex-col gap-2.5 sm:mt-10 sm:gap-4">
           {step.options.map((opt) => {
             const selected = answers[step.key] === opt.value;
             const Icon = ICONS[opt.icon];
@@ -319,13 +359,13 @@ export function OnboardingFlow({
                 onClick={() => select(opt.value)}
                 disabled={saving}
                 className={[
-                  "group flex items-center justify-between rounded-[4px] border px-5 py-4 text-left transition-all duration-150 sm:px-7 sm:py-6",
+                  "group flex items-center justify-between rounded-[4px] border px-4 py-3 text-left transition-all duration-150 sm:px-7 sm:py-6",
                   selected
                     ? "border-accent bg-accent/10"
                     : "border-border bg-surface hover:border-accent/50 hover:bg-surface-2",
                 ].join(" ")}
               >
-                <span className="flex items-center gap-4 sm:gap-5">
+                <span className="flex items-center gap-3.5 sm:gap-5">
                   {/* Icône illustrant le choix */}
                   <span
                     className={[
@@ -380,7 +420,7 @@ export function OnboardingFlow({
           </p>
         )}
 
-        <div className="mt-7 flex items-center justify-between">
+        <div className="mt-5 flex items-center justify-between sm:mt-7">
           <button
             type="button"
             onClick={back}
@@ -424,9 +464,11 @@ function SplitOptions({
   const center = options.find((o) => !o.image);
 
   return (
-    <div className="mt-8 flex flex-col gap-4 sm:mt-10">
-      {/* 2 grandes images gauche / droite */}
-      <div className="grid gap-4 sm:grid-cols-2">
+    <div className="mt-6 flex flex-col gap-3 sm:mt-10 sm:gap-4">
+      {/* 2 grandes images gauche / droite. Sur mobile : ratio paysage (1 ligne
+          de 2 cartes côte à côte) pour que tout tienne sans scroll ; desktop :
+          portrait comme avant. */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         {withImage.map((opt) => {
           const selected = selectedValue === opt.value;
           const Icon = ICONS[opt.icon];
@@ -437,7 +479,7 @@ function SplitOptions({
               onClick={() => onSelect(opt.value)}
               disabled={disabled}
               className={[
-                "group relative flex aspect-[4/5] sm:aspect-[3/4] flex-col justify-end overflow-hidden rounded-[6px] border text-left transition-all duration-200",
+                "group relative flex aspect-[3/4] sm:aspect-[3/4] flex-col justify-end overflow-hidden rounded-[6px] border text-left transition-all duration-200",
                 selected
                   ? "border-accent ring-2 ring-accent/40"
                   : "border-border hover:border-accent/60",
@@ -471,17 +513,19 @@ function SplitOptions({
                 </span>
               )}
               {/* texte par-dessus */}
-              <div className="relative z-10 p-5 sm:p-6">
+              <div className="relative z-10 p-3.5 sm:p-6">
+                {/* icône décorative : masquée sur mobile (cartes étroites en 2
+                    colonnes), réaffichée en desktop. */}
                 {Icon && (
-                  <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-[4px] border border-accent/50 bg-[#0e0e0e]/50 text-accent backdrop-blur-sm">
+                  <span className="mb-3 hidden h-10 w-10 items-center justify-center rounded-[4px] border border-accent/50 bg-[#0e0e0e]/50 text-accent backdrop-blur-sm sm:inline-flex">
                     <Icon className="h-5 w-5" strokeWidth={1.6} />
                   </span>
                 )}
-                <span className="block font-display text-2xl text-text sm:text-3xl">
+                <span className="block font-display text-lg leading-tight text-text sm:text-3xl">
                   {opt.label}
                 </span>
                 {opt.hint && (
-                  <span className="mt-1 block text-sm text-text-secondary">
+                  <span className="mt-1 block text-xs text-text-secondary sm:text-sm">
                     {opt.hint}
                   </span>
                 )}
@@ -501,7 +545,7 @@ function SplitOptions({
             onClick={() => onSelect(center.value)}
             disabled={disabled}
             className={[
-              "group flex items-center justify-center gap-3 rounded-[6px] border px-6 py-5 text-center transition-all duration-150",
+              "group flex items-center justify-center gap-3 rounded-[6px] border px-5 py-3.5 text-center transition-all duration-150 sm:px-6 sm:py-5",
               selected
                 ? "border-accent bg-accent/10"
                 : "border-border bg-surface hover:border-accent/60 hover:bg-surface-2",
@@ -513,9 +557,9 @@ function SplitOptions({
                 strokeWidth={1.7}
               />
             )}
-            <span className="font-display text-xl text-text">{center.label}</span>
+            <span className="font-display text-lg text-text sm:text-xl">{center.label}</span>
             {center.hint && (
-              <span className="text-sm text-text-secondary">— {center.hint}</span>
+              <span className="hidden text-sm text-text-secondary sm:inline">— {center.hint}</span>
             )}
           </button>
         );
