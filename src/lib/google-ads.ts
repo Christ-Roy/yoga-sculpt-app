@@ -142,6 +142,13 @@ export interface ClickConversionInput {
   /** quand la conversion a eu lieu (ISO) → formaté en eventTimestamp RFC 3339. */
   conversionDateTimeIso: string;
   valueEur: number;
+  /**
+   * Identifiant UNIQUE et STABLE de la conversion (champ `transactionId` requis
+   * par la Data Manager API — sa déduplication côté Google). On y passe la clé
+   * idempotente de la ligne (`kind:source_ref`) : un rejeu du drain ré-uploade
+   * le MÊME transactionId → Google ne compte pas la conversion 2×.
+   */
+  transactionId: string;
 }
 
 /**
@@ -187,6 +194,7 @@ export async function uploadClickConversion(
     events: [
       {
         destinationReferences: [] as string[], // vide = toutes les destinations ci-dessus
+        transactionId: input.transactionId, // requis + clé de déduplication Google
         adIdentifiers,
         conversionValue: input.valueEur,
         currency: "EUR",
