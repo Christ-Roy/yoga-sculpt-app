@@ -24,6 +24,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreditReferral } from "@/lib/anti-abuse";
 import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
 import { sanitizeRefCode } from "@/lib/ref-code";
+import {
+  getUserGclid,
+  recordAdsConversion,
+  FREE_TICKET_VALUE_EUR,
+} from "@/lib/ads-attribution";
 import { createLogger } from "@/lib/log";
 
 const log = createLogger("referral");
@@ -538,6 +543,23 @@ export async function completerReferral(
   const credited = await crediterTicketParrain(service, parrainUserId);
   if (!credited) {
     return { credited: false };
+  }
+
+  // ── ATTRIBUTION ADS — VALEUR FILLEUL (intérêts composés). ───────────────────
+  // Un filleul vient d'être validé : on attribue sa valeur au gclid du PARRAIN
+  // (s'il vient de l'Ads). C'est ce qui rend un user acquis via Ads plus rentable
+  // que sa seule 1re dépense — il ramène un réseau. Valeur = équivalent d'une
+  // séance offerte au parrain (le ticket qu'il gagne) ≈ FREE_TICKET_VALUE_EUR.
+  // Idempotent sur referralId (un filleul = une conversion). Best-effort.
+  {
+    const parrainGclid = await getUserGclid(service, parrainUserId);
+    await recordAdsConversion(service, {
+      userId: parrainUserId,
+      kind: "referral_value",
+      sourceRef: referralId,
+      gclid: parrainGclid,
+      valueEur: FREE_TICKET_VALUE_EUR,
+    });
   }
 
   const { data: marked, error: markErr } = await service

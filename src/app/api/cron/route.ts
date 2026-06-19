@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { scanAndSendReminders } from "@/lib/reminders";
 import { markPastBookingsAttended } from "@/lib/attendance";
 import { scanAndSendRelances } from "@/lib/relance";
+import { drainAdsConversions } from "@/lib/ads-attribution";
+import { createServiceClient } from "@/lib/supabase/service";
 import { createLogger, serializeError } from "@/lib/log";
 
 const log = createLogger("cron");
@@ -123,7 +125,26 @@ export async function GET(request: Request) {
       };
     }
 
-    return NextResponse.json({ ok: true, ...resultat, attendance, relances });
+    // 4. Drain des conversions Google Ads en attente (upload offline via gclid).
+    //    L'écriture du journal ads_conversions est synchrone (webhook/résa/parrainage) ;
+    //    l'upload réseau vers l'API Ads se fait ici, en arrière-plan, idempotent.
+    let adsConversions;
+    try {
+      adsConversions = await drainAdsConversions(createServiceClient(), process.env);
+    } catch (adsErr) {
+      log.error("Passe drain Ads échouée (rappels OK)", {
+        err: serializeError(adsErr),
+      });
+      adsConversions = { uploaded: 0, failed: 1, skipped: 0 };
+    }
+
+    return NextResponse.json({
+      ok: true,
+      ...resultat,
+      attendance,
+      relances,
+      adsConversions,
+    });
   } catch (err) {
     // scanAndSendReminders agrège déjà les erreurs d'envoi ; un throw ici =
     // défaillance plus profonde (client Supabase indisponible, etc.).
