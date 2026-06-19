@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { CalendarPlus, Gift, Sparkles, Ticket, User } from "lucide-react";
+import {
+  CalendarCheck,
+  CalendarPlus,
+  Gift,
+  Sparkles,
+  Ticket,
+  User,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 /**
@@ -38,6 +45,12 @@ const TUILES: Tuile[] = [
     href: "/espace/reservations",
     label: "Mes réservations",
     description: "Mes séances à venir",
+    icon: CalendarCheck,
+  },
+  {
+    href: "#mes-tickets",
+    label: "Mes tickets",
+    description: "Solde & achat",
     icon: Ticket,
   },
   {

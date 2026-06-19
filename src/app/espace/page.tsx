@@ -154,7 +154,10 @@ export default async function EspacePage() {
           <SeancesAVenirWidget seancesInitiales={seances} />
         </div>
 
-        <TicketsWidget solde={solde} error={Boolean(ticketsErr)} />
+        {/* `id`/`scroll-mt` : cible de la tuile « Mes tickets » de la mosaïque. */}
+        <div id="mes-tickets" className="scroll-mt-20">
+          <TicketsWidget solde={solde} error={Boolean(ticketsErr)} />
+        </div>
 
         <ParrainageWidget />
 
