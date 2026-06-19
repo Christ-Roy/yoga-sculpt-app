@@ -407,6 +407,46 @@ describe("completerReferral — fail-safes & idempotence concurrente", () => {
     ).toBeUndefined();
   });
 
+  it("credited:false quand le PLAFOND est atteint — aucun ticket crédité (anti-farming)", async () => {
+    // Plafond effectif = défaut métier 3 (pas de REFERRAL_MAX_CREDITS stubé).
+    queueResolution(); // parrain résolu
+    // pas de referral pending → on en crée un à la volée (traçabilité).
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    // comptage plafond : ce parrain a DÉJÀ 3 filleuls crédités → cap atteint.
+    service.queueResult("referrals", "select", { data: null, error: null, count: 3 });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    // Le levier qui doit tenir : AUCUN ticket inséré au-delà du plafond.
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("le plafond se DESSERRE via REFERRAL_MAX_CREDITS (4 crédités < 5 → on crédite)", async () => {
+    // Surcharge env : plafond porté à 5. Avec 4 déjà crédités, le 5e passe.
+    vi.stubEnv("REFERRAL_MAX_CREDITS", "5");
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null, count: 4 });
+    // crédit ticket OK + marquage referral OK.
+    service.queueResult("tickets", "insert", { data: null, error: null });
+    service.queueResult("referrals", "update", { data: { id: "ref-new" }, error: null });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: true,
+    });
+    // Un ticket a bien été crédité (on était sous le plafond desserré).
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeDefined();
+  });
+
   it("credited:false si l'INSERT du ticket parrain échoue", async () => {
     queueResolution();
     service.queueResult("referrals", "select", { data: null, error: null }); // pending absent
