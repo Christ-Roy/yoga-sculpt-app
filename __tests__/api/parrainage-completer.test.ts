@@ -6,22 +6,25 @@ import {
 } from "../helpers/supabase-mock";
 
 /**
- * Tests de POST /api/parrainage/completer — complétion du parrainage d'un FILLEUL.
+ * Tests de POST /api/parrainage/completer — LIAISON du parrainage d'un FILLEUL.
+ *
+ * ⚠️ ANTI-FARMING (2026-06-19) : cette route NE CRÉDITE PLUS le parrain. Elle se
+ * contente de LIER le filleul à son parrain en `pending` (ticket_credite=false).
+ * Le ticket du parrain ne tombe qu'à la 1re séance HONORÉE du filleul (cf.
+ * crediterParrainsApresSeanceHonoree, testé dans referral-lib.test.ts). Aucun de
+ * ces tests ne doit donc jamais observer d'insert dans `tickets`.
  *
  * POINT CRUCIAL : la réponse est TOUJOURS 200 { ok: true } dès lors que la
- * requête est bien formée et l'utilisateur authentifié — que le crédit ait eu
- * lieu OU PAS (anti-abus, code inconnu, déjà crédité…). On ne révèle JAMAIS le
- * motif d'un non-crédit (échec silencieux).
+ * requête est bien formée et l'utilisateur authentifié (échec silencieux).
  *
  * Comportements couverts :
  *   - 401 sans authentification ;
  *   - 400 sur corps invalide / JSON invalide ;
- *   - 200 sans code (on enregistre juste les signaux, aucun crédit) ;
- *   - 200 + crédit RÉEL (insert ticket) sur code valide + anti-abus OK ;
- *   - 200 SILENCIEUX sur code inconnu (aucun ticket) ;
- *   - 200 SILENCIEUX si l'anti-abus refuse (filleul déjà crédité) — aucun ticket ;
+ *   - 200 sans code (on enregistre juste les signaux, aucune liaison) ;
+ *   - 200 + LIAISON pending (referral créé, AUCUN ticket) sur code valide ;
+ *   - 200 SILENCIEUX sur code inconnu (aucune liaison, aucun ticket) ;
  *   - 200 SILENCIEUX si le filleul tente de se parrainer lui-même (aucun ticket) ;
- *   - idempotence : un referral déjà crédité ne re-crédite jamais ;
+ *   - JAMAIS de ticket crédité à l'inscription, quel que soit le cas ;
  *   - GET → 405.
  *
  * On utilise le VRAI lib/referral + lib/anti-abuse + lib/fingerprint (logique
@@ -57,8 +60,7 @@ const CODE = "ABCD2345";
 
 /**
  * Construit une requête sans header d'IP (→ getClientIp renvoie null) et sans
- * fingerprint exploitable → on évite les requêtes R2/R3 de canCreditReferral,
- * ce qui garde le séquencement des mocks simple et déterministe.
+ * fingerprint exploitable.
  */
 function makeReq(body: unknown): Request {
   return {
@@ -68,42 +70,24 @@ function makeReq(body: unknown): Request {
 }
 
 /**
- * Programme la séquence Supabase d'un crédit LÉGITIME (anti-abus OK), sans IP ni
- * fingerprint. Ordre d'exécution réel de la route :
+ * Programme la séquence Supabase d'une LIAISON pending (nouveau flux). Ordre :
  *   1. enregistrerSignaux  → account_signals::select (existant) puis ::upsert
  *   2. completerReferral :
  *      a. profiles::select  → résolution du parrain via le code
- *      b. canCreditReferral → referrals::select (R4 : filleul déjà crédité ?)
- *      c. referrals::select → recherche d'un pending (parrain, email)
- *      d. referrals::insert → création du referral à la volée (pas de pending)
- *      e. tickets::insert   → crédit du ticket au parrain
- *      f. referrals::update → marquage completed/credite
+ *      b. lierFilleulSansCrediter → referrals::select (pending existant ?)
+ *      c. referrals::insert → création du referral pending à la volée
+ *   (PLUS de R4, plafond, ticket, marquage : tout cela est déféré à la séance.)
  */
-function queueLegitCredit() {
-  // 1. enregistrerSignaux : pas de signaux existants.
+function queueLegitLink() {
   serviceMock.queueResult("account_signals", "select", { data: null, error: null });
   serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
-  // 2a. parrain résolu via le code.
   serviceMock.queueResult("profiles", "select", {
     data: { id: PARRAIN_ID },
     error: null,
   });
-  // 2b. R4 : filleul jamais crédité (liste vide).
-  serviceMock.queueResult("referrals", "select", { data: [], error: null });
-  // 2c. pas de referral pending existant.
+  // lierFilleulSansCrediter : pas de pending existant → insert.
   serviceMock.queueResult("referrals", "select", { data: null, error: null });
-  // 2d. création du referral à la volée → renvoie un id.
-  serviceMock.queueResult("referrals", "insert", {
-    data: { id: "ref-new" },
-    error: null,
-  });
-  // 2e. crédit du ticket.
-  serviceMock.queueResult("tickets", "insert", { data: null, error: null });
-  // 2f. marquage completed (1 ligne touchée → maybeSingle renvoie un id).
-  serviceMock.queueResult("referrals", "update", {
-    data: { id: "ref-new" },
-    error: null,
-  });
+  serviceMock.queueResult("referrals", "insert", { data: null, error: null });
 }
 
 beforeEach(() => {
@@ -142,7 +126,7 @@ describe("POST /api/parrainage/completer", () => {
     expect(res.status).toBe(400);
   });
 
-  it("200 sans code : enregistre juste les signaux, aucun crédit (aucun ticket)", async () => {
+  it("200 sans code : enregistre juste les signaux, aucune liaison (aucun ticket)", async () => {
     serviceMock.queueResult("account_signals", "select", { data: null, error: null });
     serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
 
@@ -163,39 +147,60 @@ describe("POST /api/parrainage/completer", () => {
     ).toBeDefined();
   });
 
-  it("200 + crédit RÉEL du ticket sur code valide et anti-abus OK", async () => {
-    queueLegitCredit();
+  it("200 + LIAISON pending sur code valide — AUCUN ticket crédité à l'inscription", async () => {
+    queueLegitLink();
 
     const { POST } = await import("@/app/api/parrainage/completer/route");
     const res = asMockResponse(await POST(makeReq({ code: CODE })));
 
     expect(res.status).toBe(200);
-    expect((res.body as { ok: boolean }).ok).toBe(true);
+    expect(res.body).toEqual({ ok: true });
 
-    // Le ticket de parrainage a bien été crédité au PARRAIN (type collectif, offert).
-    const ticketInsert = serviceMock.calls.find(
-      (c) => c.table === "tickets" && c.op === "insert",
+    // Le filleul a bien été LIÉ : un referral pending est inséré, lié au filleul.
+    const refInsert = serviceMock.calls.find(
+      (c) => c.table === "referrals" && c.op === "insert",
     );
-    expect(ticketInsert).toBeDefined();
-    expect(ticketInsert?.payload).toMatchObject({
-      user_id: PARRAIN_ID,
-      type: "collectif",
-      quantite_initiale: 1,
-      quantite_restante: 1,
-    });
-
-    // Le referral a été marqué completed + crédité.
-    const refUpdate = serviceMock.calls.find(
-      (c) => c.table === "referrals" && c.op === "update",
-    );
-    expect(refUpdate?.payload).toMatchObject({
-      status: "completed",
-      ticket_credite: true,
+    expect(refInsert).toBeDefined();
+    expect(refInsert?.payload).toMatchObject({
+      parrain_user_id: PARRAIN_ID,
       filleul_user_id: FILLEUL.id,
+      status: "pending",
     });
+
+    // ANTI-FARMING : AUCUN ticket crédité à l'inscription (le crédit est déféré).
+    expect(
+      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
   });
 
-  it("200 SILENCIEUX sur code inconnu — aucun ticket, aucun motif révélé", async () => {
+  it("200 + LIAISON via update si un referral pending (invitation e-mail) existe déjà", async () => {
+    serviceMock.queueResult("account_signals", "select", { data: null, error: null });
+    serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
+    serviceMock.queueResult("profiles", "select", {
+      data: { id: PARRAIN_ID },
+      error: null,
+    });
+    // lierFilleulSansCrediter : pending existant trouvé → update (rattache filleul).
+    serviceMock.queueResult("referrals", "select", {
+      data: { id: "ref-invite" },
+      error: null,
+    });
+    serviceMock.queueResult("referrals", "update", { data: null, error: null });
+
+    const { POST } = await import("@/app/api/parrainage/completer/route");
+    const res = asMockResponse(await POST(makeReq({ code: CODE })));
+
+    expect(res.status).toBe(200);
+    const upd = serviceMock.calls.find(
+      (c) => c.table === "referrals" && c.op === "update",
+    );
+    expect(upd?.payload).toMatchObject({ filleul_user_id: FILLEUL.id });
+    expect(
+      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("200 SILENCIEUX sur code inconnu — aucune liaison, aucun motif révélé", async () => {
     serviceMock.queueResult("account_signals", "select", { data: null, error: null });
     serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
     // Résolution du parrain : code inconnu → pas de profil.
@@ -210,33 +215,9 @@ describe("POST /api/parrainage/completer", () => {
     expect(
       serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
     ).toBeUndefined();
-  });
-
-  it("200 SILENCIEUX si l'anti-abus refuse (filleul déjà crédité) — aucun ticket", async () => {
-    serviceMock.queueResult("account_signals", "select", { data: null, error: null });
-    serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
-    // Parrain résolu…
-    serviceMock.queueResult("profiles", "select", {
-      data: { id: PARRAIN_ID },
-      error: null,
-    });
-    // …mais R4 : ce filleul a DÉJÀ déclenché un crédit → canCreditReferral=false.
-    serviceMock.queueResult("referrals", "select", {
-      data: [{ id: "ref-old" }],
-      error: null,
-    });
-    // lierFilleulSansCrediter : cherche un pending (aucun) puis insert best-effort.
-    serviceMock.queueResult("referrals", "select", { data: null, error: null });
-    serviceMock.queueResult("referrals", "insert", { data: null, error: null });
-
-    const { POST } = await import("@/app/api/parrainage/completer/route");
-    const res = asMockResponse(await POST(makeReq({ code: CODE })));
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
-    // Aucun ticket crédité (anti-abus a bloqué).
+    // Code inconnu → on ne lie même pas de referral.
     expect(
-      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+      serviceMock.calls.find((c) => c.table === "referrals" && c.op === "insert"),
     ).toBeUndefined();
   });
 
@@ -257,64 +238,9 @@ describe("POST /api/parrainage/completer", () => {
     expect(
       serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
     ).toBeUndefined();
-  });
-
-  it("idempotence : un referral déjà crédité ne re-crédite jamais (200, aucun ticket)", async () => {
-    serviceMock.queueResult("account_signals", "select", { data: null, error: null });
-    serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
-    // Parrain résolu.
-    serviceMock.queueResult("profiles", "select", {
-      data: { id: PARRAIN_ID },
-      error: null,
-    });
-    // R4 : filleul pas encore marqué crédité globalement (liste vide).
-    serviceMock.queueResult("referrals", "select", { data: [], error: null });
-    // Recherche du pending : trouvé ET déjà ticket_credite=true → idempotence.
-    serviceMock.queueResult("referrals", "select", {
-      data: { id: "ref-existant", ticket_credite: true },
-      error: null,
-    });
-
-    const { POST } = await import("@/app/api/parrainage/completer/route");
-    const res = asMockResponse(await POST(makeReq({ code: CODE })));
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
-    // Pas de double crédit.
+    // Auto-parrainage : aucune liaison non plus.
     expect(
-      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
-    ).toBeUndefined();
-  });
-
-  it("200 SILENCIEUX si le PLAFOND de parrainages est atteint — aucun ticket (anti-farming)", async () => {
-    serviceMock.queueResult("account_signals", "select", { data: null, error: null });
-    serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
-    // Parrain résolu.
-    serviceMock.queueResult("profiles", "select", {
-      data: { id: PARRAIN_ID },
-      error: null,
-    });
-    // R4 : ce filleul n'a jamais été crédité (liste vide) → anti-abus OK.
-    serviceMock.queueResult("referrals", "select", { data: [], error: null });
-    // Pas de referral pending existant.
-    serviceMock.queueResult("referrals", "select", { data: null, error: null });
-    // Création du referral à la volée → id.
-    serviceMock.queueResult("referrals", "insert", {
-      data: { id: "ref-new" },
-      error: null,
-    });
-    // 5bis PLAFOND : le parrain a DÉJÀ 3 filleuls crédités (count = défaut 3) →
-    // on ne crédite plus (anti-farming). Le filleul reste rattaché, pas de ticket.
-    serviceMock.queueResult("referrals", "select", { data: null, error: null, count: 3 });
-
-    const { POST } = await import("@/app/api/parrainage/completer/route");
-    const res = asMockResponse(await POST(makeReq({ code: CODE })));
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
-    // Plafond atteint → AUCUN ticket crédité.
-    expect(
-      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+      serviceMock.calls.find((c) => c.table === "referrals" && c.op === "insert"),
     ).toBeUndefined();
   });
 });

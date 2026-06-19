@@ -1,6 +1,26 @@
 # [P2] QA sécu — Parrainage : durcir l'anti-abus (reliquat après le cap)
 
-**Statut** : partiellement livré · **Qui** : agent · **Source** : QA sécu 2026-06-19 (axe #4 anti-abus)
+**Statut** : levier #1 LIVRÉ (crédit déféré à la séance honorée) · **Qui** : agent · **Source** : QA sécu 2026-06-19 (axe #4 anti-abus)
+
+## ✅ LIVRÉ 2026-06-19 — levier #1 : crédit APRÈS la 1re séance HONORÉE (tue le farming)
+Le crédit du parrain n'est PLUS déclenché à l'inscription du filleul. Désormais :
+- à l'inscription (callback auth / POST /completer), `completerReferral` se contente
+  de LIER le filleul au parrain en `pending` (referral posé, `ticket_credite=false`,
+  AUCUN ticket, AUCUN anti-abus évalué — il le sera au crédit) ;
+- le ticket du parrain tombe quand le filleul est pointé `attendance='attended'`
+  pour la 1re fois (route admin attendance → `crediterParrainsApresSeanceHonoree`),
+  avec ré-évaluation de l'anti-abus (`canCreditReferral`) + plafond (`maxParrainagesCredites`),
+  idempotent sur `referrals.ticket_credite`, best-effort (n'échoue jamais le pointage).
+
+Effet : un faux compte / un compte EXISTANT qui ne vient jamais en cours ne sera
+jamais pointé présent → le parrain n'est jamais crédité. Ferme aussi le vecteur
+« parrainer un compte existant » (cf. section en bas). Fichiers : `src/lib/referral.ts`
+(`completerReferral` simplifié + `crediterParrainsApresSeanceHonoree` + `crediterReferralPending`),
+`src/app/api/admin/bookings/attendance/route.ts` (déclencheur sur transition→attended),
+`src/app/auth/callback/route.ts` (event `referral_signup` au lieu de credited/blocked),
+migration additive `0018_referral_credit_on_attendance.sql` (index lookup + doc).
+Tests : `__tests__/lib/referral-lib.test.ts` + `__tests__/api/parrainage-completer.test.ts`
++ `__tests__/api/admin/bookings/attendance.test.ts`.
 
 ## ✅ Déjà livré (commit cba2c2a)
 **Cap par parrain** : un parrain n'est crédité qu'au maximum `maxParrainagesCredites()`
@@ -13,15 +33,7 @@ plafond avec des faux comptes.
 
 ## ⬜ Reste à faire (par ordre d'impact)
 
-### 1. Créditer le parrain APRÈS la 1ère séance HONORÉE du filleul (levier qui tue l'attaque)
-Aujourd'hui `referral.ts` `completerReferral` crédite dès l'inscription du filleul (callback
-OAuth / `/completer`), pas après une présence en cours. Un faux compte n'ira jamais en
-cours → conditionner le crédit à un booking passé + `bookings.attendance='attended'`
-(tables déjà présentes) supprime l'incitation à créer des comptes bidon.
-- ⚠️ Ça déplace le déclencheur du crédit du flux d'inscription vers le **cron d'attendance**
-  (recâblage non trivial, laissé hors du commit cap pour ne pas fragiliser l'inscription).
-  Un `TODO(anti-abus)` est déjà posé à l'endroit exact dans `src/lib/referral.ts`
-  (juste après le check du plafond).
+### ~~1. Créditer le parrain APRÈS la 1ère séance HONORÉE du filleul~~ ✅ LIVRÉ (cf. ci-dessus)
 
 ### 2. Blocklist email jetable externe/dynamique + normalisation des alias Gmail
 `src/lib/anti-abuse.ts` : la blocklist `DISPOSABLE_EMAIL_DOMAINS` est **statique** (~55
