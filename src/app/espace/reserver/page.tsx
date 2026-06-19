@@ -51,6 +51,20 @@ export default async function ReserverPage({
     }
   }
 
+  // Le profil a-t-il déjà un téléphone ? Si non, `ReserverClient` demandera le
+  // numéro AVANT de confirmer une réservation (Alice en a besoin pour rappeler
+  // la cliente). On ne lit que ce flag — le tel lui-même reste côté serveur.
+  // `user.phone` (auth) compte aussi : s'il est présent, inutile de redemander.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("phone")
+    .eq("id", user.id)
+    .maybeSingle();
+  const hasPhone = Boolean(
+    (user.phone && user.phone.trim()) ||
+      (profile?.phone && String(profile.phone).trim()),
+  );
+
   const { status } = await searchParams;
   const statusParam =
     status === "success" || status === "cancel" ? status : null;
@@ -77,7 +91,11 @@ export default async function ReserverPage({
           </Link>
         </div>
 
-      <ReserverClient soldeInitial={solde} statusParam={statusParam} />
+      <ReserverClient
+        soldeInitial={solde}
+        statusParam={statusParam}
+        hasPhone={hasPhone}
+      />
     </div>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { isValidPhone } from "@/lib/phone";
 import type { Creneau } from "@/lib/reservation";
 import {
   cleJour,
@@ -57,14 +59,65 @@ function creneauVersSeance(c: Creneau): SeanceAgenda {
 export function ReserverClient({
   soldeInitial,
   statusParam,
+  hasPhone,
 }: {
   soldeInitial: SoldeTickets;
   /** `?status=success|cancel` au retour de Stripe. */
   statusParam: "success" | "cancel" | null;
+  /**
+   * Le profil a-t-il déjà un téléphone ? Si NON, on réclame le numéro AVANT de
+   * confirmer une réservation (Alice en a besoin pour rappeler la cliente). Si
+   * OUI, on ne demande rien : le tél est déjà en base.
+   */
+  hasPhone: boolean;
 }) {
   const [creneaux, setCreneaux] = useState<Creneau[] | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [solde, setSolde] = useState<SoldeTickets>(soldeInitial);
+
+  // ── Garde TÉLÉPHONE ─────────────────────────────────────────────────────────
+  // Tél fourni pendant cette session (validé) : une fois donné, on ne redemande
+  // plus et on l'envoie avec chaque réservation pour le ranger côté serveur.
+  const [phone, setPhone] = useState<string | null>(null);
+  // Modal de saisie ouvert ? + résolveur de la promesse en attente (le flux de
+  // réservation s'interrompt tant que la cliente n'a pas validé / annulé).
+  const [askPhone, setAskPhone] = useState(false);
+  const phoneResolver = useRef<((value: string | null) => void) | null>(null);
+
+  // Le profil n'a pas de tél ET on n'en a pas encore saisi → il faut le demander.
+  const needsPhone = !hasPhone && phone === null;
+
+  /**
+   * Garantit qu'on a un téléphone avant de réserver.
+   *   - profil déjà pourvu (ou tél déjà saisi cette session) → résout direct ;
+   *   - sinon → ouvre la modal et résout quand la cliente valide (numéro) ou
+   *     annule (`null` → on AVORTE la réservation).
+   */
+  const ensurePhone = useCallback((): Promise<string | null> => {
+    if (!needsPhone) return Promise.resolve(phone);
+    return new Promise<string | null>((resolve) => {
+      phoneResolver.current = resolve;
+      setAskPhone(true);
+    });
+  }, [needsPhone, phone]);
+
+  // Validation + enregistrement du tél saisi dans la modal.
+  function soumettrePhone(raw: string) {
+    const ok = isValidPhone(raw);
+    if (!ok) return false;
+    setPhone(raw);
+    setAskPhone(false);
+    phoneResolver.current?.(raw);
+    phoneResolver.current = null;
+    return true;
+  }
+
+  // Annulation de la modal → on AVORTE la réservation en cours.
+  function annulerPhone() {
+    setAskPhone(false);
+    phoneResolver.current?.(null);
+    phoneResolver.current = null;
+  }
 
   // Réservations effectuées dans cette session : creneauId → bookingId.
   // Permet de basculer la carte en « réservé » et d'alimenter le .ics.
@@ -136,12 +189,17 @@ export function ReserverClient({
 
   // ── Réservation d'un créneau. ───────────────────────────────────────────────
   async function reserver(c: Creneau) {
+    // Garde tél : si le profil n'en a pas, on réclame le numéro AVANT d'appeler
+    // l'API. Annulation (null) → on n'engage pas la réservation.
+    const tel = await ensurePhone();
+    if (needsPhone && tel === null) return;
+
     setEnCours(c.id);
     try {
       const res = await fetch("/api/reserver", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creneauId: c.id }),
+        body: JSON.stringify(tel ? { creneauId: c.id, phone: tel } : { creneauId: c.id }),
       });
 
       if (res.ok) {
@@ -208,6 +266,8 @@ export function ReserverClient({
         </h2>
         <ReserverParticulierLibre
           soldeParticulier={solde.particulier}
+          ensurePhone={ensurePhone}
+          needsPhone={needsPhone}
           onReserved={(booking) => {
             setSolde((s) => ({
               ...s,
@@ -291,6 +351,123 @@ export function ReserverClient({
       {/* Bloc d'achat de tickets (mis en avant après un 402). */}
       <div ref={achatRef}>
         <BuyTickets highlightType={achatType} />
+      </div>
+
+      {/* Modal TÉLÉPHONE — réclamée à la 1ère réservation si le profil n'a pas
+          de numéro. Une fois validé, on ne la rouvre plus de la session. */}
+      {askPhone && (
+        <PhoneGateDialog onSubmit={soumettrePhone} onCancel={annulerPhone} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Boîte de dialogue de saisie du téléphone (gate avant réservation).
+ * Validée via `isValidPhone` ; le numéro est requis pour confirmer (Alice doit
+ * pouvoir rappeler la cliente). Accessible : role=dialog, focus auto, fermeture
+ * à Échap.
+ */
+function PhoneGateDialog({
+  onSubmit,
+  onCancel,
+}: {
+  /** Renvoie `true` si le numéro est valide (la modal se ferme), `false` sinon. */
+  onSubmit: (raw: string) => boolean;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const [erreur, setErreur] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const ok = onSubmit(value);
+    if (!ok) {
+      setErreur(
+        "Numéro invalide. Saisissez un numéro français valide (ex. 06 12 34 56 78).",
+      );
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="phone-gate-title"
+      onClick={(e) => {
+        // Clic sur l'overlay (hors carte) = annulation.
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="w-full max-w-sm rounded-[4px] border border-border bg-surface p-6 shadow-xl animate-fade-in-up">
+        <h3
+          id="phone-gate-title"
+          className="font-display text-xl text-text"
+        >
+          Votre téléphone
+        </h3>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+          Pour finaliser votre réservation, laissez votre numéro : Alice pourra
+          vous joindre si besoin (changement d&apos;horaire, info pratique).
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
+          <label htmlFor="phone-gate-input" className="sr-only">
+            Numéro de téléphone
+          </label>
+          <input
+            id="phone-gate-input"
+            ref={inputRef}
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            required
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (erreur) setErreur(null);
+            }}
+            placeholder="06 12 34 56 78"
+            aria-invalid={erreur ? true : undefined}
+            aria-describedby={erreur ? "phone-gate-error" : undefined}
+            className="w-full rounded-[4px] border border-border bg-surface-2 px-4 py-3 text-sm text-text placeholder:text-text-secondary/70 focus:border-accent focus:outline-none"
+          />
+          {erreur && (
+            <p
+              id="phone-gate-error"
+              className="text-sm text-red-400"
+              role="alert"
+            >
+              {erreur}
+            </p>
+          )}
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-[4px] border border-border bg-surface px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-[4px] bg-accent px-4 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              Continuer
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

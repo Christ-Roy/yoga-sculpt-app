@@ -1,7 +1,9 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/Button";
+import { createClient } from "@/lib/supabase/client";
+import { safeInternalRedirect } from "@/lib/auth-redirect";
 import {
   signInWithMagicLink,
   signInWithOAuth,
@@ -78,6 +80,162 @@ function MicrosoftIcon() {
   );
 }
 
+// ── Google One Tap (GSI) ──────────────────────────────────────────────────────
+// client_id du projet GCP `yoga-sculpt-auth`. Surchargé par
+// NEXT_PUBLIC_GOOGLE_CLIENT_ID au build (cf .env.example + workflows deploy-*).
+const GOOGLE_CLIENT_ID =
+  process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+  "201393978914-0r5v4qnjkmh4jj6nrf6ulppscrj5me02.apps.googleusercontent.com";
+
+const GSI_SRC = "https://accounts.google.com/gsi/client";
+
+// Typage minimal de l'API Google Identity Services (window.google.accounts.id).
+interface GoogleCredentialResponse {
+  credential?: string;
+}
+interface GoogleIdApi {
+  initialize: (config: {
+    client_id: string;
+    callback: (res: GoogleCredentialResponse) => void;
+    auto_select?: boolean;
+    cancel_on_tap_outside?: boolean;
+    context?: string;
+    ux_mode?: string;
+    itp_support?: boolean;
+    prompt_parent_id?: string;
+  }) => void;
+  prompt: () => void;
+}
+declare global {
+  interface Window {
+    google?: { accounts?: { id?: GoogleIdApi } };
+  }
+}
+
+/**
+ * Google One Tap pour l'espace client (auth LOCALE, cookies app).
+ *
+ * Contrairement au vitrine (cross-domain → relai `/auth/onetap`), ici la session
+ * Supabase vit sur le MÊME domaine que cette page : on ouvre donc la session
+ * DIRECTEMENT dans le callback via `signInWithIdToken({ provider:"google" })`,
+ * sans relai. Au succès → navigation dure vers `safeInternalRedirect(?redirectTo,
+ * "/espace")` : les Server Components re-tournent avec le cookie de session
+ * fraîchement posé (et routent vers /onboarding si besoin). Le cookie `ys_ref`
+ * (parrainage) est SAME-ORIGIN → il survit à la navigation sans qu'on y touche.
+ *
+ * RGPD/perf : le SDK GSI n'est chargé et le prompt armé qu'APRÈS une 1ʳᵉ
+ * interaction (scroll/clic/touch) — pas d'invite intrusive au 1er paint.
+ *
+ * STAGING : Google OAuth n'est PAS configuré sur le Supabase staging →
+ * `signInWithIdToken` renvoie une erreur (provider non supporté). On l'avale
+ * SILENCIEUSEMENT (fallback : le bouton Google classique / le magic-link). Le One
+ * Tap n'est donc réellement fonctionnel qu'en PROD.
+ *
+ * Aucune erreur n'est remontée à l'UI : l'échec One Tap est TOUJOURS silencieux
+ * (les autres méthodes restent dispo).
+ */
+function useGoogleOneTap() {
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    if (typeof window === "undefined") return;
+
+    let armed = false;
+    let scriptEl: HTMLScriptElement | null = null;
+
+    // Callback One Tap : ouvre la session Supabase DIRECTEMENT (id_token Google).
+    const handleCredential = (res: GoogleCredentialResponse) => {
+      if (!res?.credential) return;
+      void (async () => {
+        try {
+          const supabase = createClient();
+          const { error } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token: res.credential as string,
+          });
+          if (error) {
+            // Staging (provider non configuré) ou refus → fallback silencieux.
+            // On NE casse PAS le bouton Google classique ni le magic-link.
+            return;
+          }
+          // Succès : navigation dure pour rejouer les Server Components avec la
+          // session. redirectTo issu de l'URL, validé anti open-redirect.
+          const redirectTo = new URLSearchParams(window.location.search).get(
+            "redirectTo",
+          );
+          window.location.assign(safeInternalRedirect(redirectTo, "/espace"));
+        } catch {
+          // Tout échec inattendu → fallback silencieux (autres méthodes dispo).
+        }
+      })();
+    };
+
+    const startOneTap = () => {
+      if (armed) return;
+      armed = true;
+      const id = window.google?.accounts?.id;
+      if (!id) return;
+      try {
+        id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleCredential,
+          auto_select: false,
+          cancel_on_tap_outside: true,
+          context: "signin",
+          itp_support: true,
+          prompt_parent_id: "onetap-anchor",
+        });
+        id.prompt();
+      } catch {
+        // GSI indisponible (réseau, bloqueur) → on ne propose juste pas le One Tap.
+      }
+    };
+
+    const loadGsi = () => {
+      if (window.google?.accounts?.id) {
+        startOneTap();
+        return;
+      }
+      const existing = document.querySelector<HTMLScriptElement>(
+        `script[src="${GSI_SRC}"]`,
+      );
+      if (existing) {
+        existing.addEventListener("load", startOneTap, { once: true });
+        return;
+      }
+      scriptEl = document.createElement("script");
+      scriptEl.src = GSI_SRC;
+      scriptEl.async = true;
+      scriptEl.defer = true;
+      scriptEl.addEventListener("load", startOneTap, { once: true });
+      document.head.appendChild(scriptEl);
+    };
+
+    const onFirstInteraction = () => {
+      cleanupListeners();
+      loadGsi();
+    };
+    const events: (keyof DocumentEventMap)[] = [
+      "scroll",
+      "pointerdown",
+      "keydown",
+      "touchstart",
+    ];
+    const cleanupListeners = () => {
+      events.forEach((e) => window.removeEventListener(e, onFirstInteraction));
+    };
+    events.forEach((e) =>
+      window.addEventListener(e, onFirstInteraction, {
+        once: true,
+        passive: true,
+      }),
+    );
+
+    return () => {
+      cleanupListeners();
+    };
+  }, []);
+}
+
 export function AuthMethods({
   initialError,
   submitLabel = "Recevoir le lien de connexion",
@@ -94,6 +252,11 @@ export function AuthMethods({
   );
   const [isOAuthPending, startOAuth] = useTransition();
 
+  // Google One Tap (popup auto, sans clic). Coexiste avec le bouton Google
+  // classique et le magic-link. Inopérant sur staging (provider non configuré),
+  // échec silencieux.
+  useGoogleOneTap();
+
   function handleOAuth(provider: "google" | "azure") {
     setOauthError(undefined);
     startOAuth(async () => {
@@ -107,6 +270,10 @@ export function AuthMethods({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Ancre du prompt Google One Tap (GSI y injecte son iframe). Aligné en
+          haut du bloc d'auth ; vide tant que le One Tap n'est pas armé. */}
+      <div id="onetap-anchor" className="flex justify-center empty:hidden" />
+
       {/* OAuth (Google / Microsoft) — prêts, activables côté Supabase */}
       <div className="flex flex-col gap-3">
         <Button
