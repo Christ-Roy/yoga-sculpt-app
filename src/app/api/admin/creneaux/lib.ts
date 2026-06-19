@@ -127,7 +127,39 @@ export function addMinutesIso(iso: string, minutes: number): string {
 const ymdRe = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const hmRe = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+// ── Bornes MÉTIER (garde-fou anti-faute-de-frappe, pas une faille). ──────────
+// La route est gatée `requireAdmin()` (seule Alice y accède, c'est SON agenda) :
+// ce ne sont pas des contrôles de sécurité mais des bornes raisonnables qui
+// évitent un créneau posé à 03:00 ou d'une durée absurde par erreur de saisie.
+/** Heure murale (Paris) la plus tôt acceptée pour un créneau (inclus). */
+export const HEURE_MIN = "06:00";
+/** Heure murale (Paris) la plus tard acceptée pour la FIN d'un créneau (inclus). */
+export const HEURE_MAX = "22:00";
+/** Durée minimale d'un créneau (minutes). */
+export const DUREE_MIN = 15;
+/** Durée maximale d'un créneau (minutes) — couvre un atelier long. */
+export const DUREE_MAX = 240;
+
 const typeSchema: z.ZodType<TicketType> = z.enum(["collectif", "particulier"]);
+
+/** Minutes depuis minuit pour « HH:MM » (les regex hmRe garantissent le format). */
+function minutesDepuisMinuit(hm: string): number {
+  const [h, m] = hm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+const MIN_MINUTES = minutesDepuisMinuit(HEURE_MIN);
+const MAX_MINUTES = minutesDepuisMinuit(HEURE_MAX);
+
+/** Vrai si « HH:MM » est dans la plage horaire métier [HEURE_MIN..HEURE_MAX]. */
+function dansPlageHoraire(hm: string): boolean {
+  const t = minutesDepuisMinuit(hm);
+  return t >= MIN_MINUTES && t <= MAX_MINUTES;
+}
+
+/** Refinement zod réutilisable : une heure « HH:MM » doit être dans la plage. */
+const heureDansPlage = (hm: string) => dansPlageHoraire(hm);
+const messagePlage = `Heure hors plage autorisée (${HEURE_MIN}–${HEURE_MAX}).`;
 
 /**
  * Schéma d'un créneau créé/édité « à la volée » (sans preset).
@@ -136,8 +168,14 @@ const typeSchema: z.ZodType<TicketType> = z.enum(["collectif", "particulier"]);
 export const creneauInputSchema = z
   .object({
     date: z.string().regex(ymdRe, "Date attendue au format AAAA-MM-JJ."),
-    heureDebut: z.string().regex(hmRe, "Heure de début attendue au format HH:MM."),
-    heureFin: z.string().regex(hmRe, "Heure de fin attendue au format HH:MM."),
+    heureDebut: z
+      .string()
+      .regex(hmRe, "Heure de début attendue au format HH:MM.")
+      .refine(heureDansPlage, messagePlage),
+    heureFin: z
+      .string()
+      .regex(hmRe, "Heure de fin attendue au format HH:MM.")
+      .refine(heureDansPlage, messagePlage),
     type: typeSchema.default("collectif"),
     lieu: z.string().trim().min(1).max(300).default(LIEU_DEFAUT),
     capacite: z.number().int().positive().max(100).optional(),
@@ -152,8 +190,16 @@ export const creneauPatchSchema = z
   .object({
     eventId: z.string().min(1, "eventId requis."),
     date: z.string().regex(ymdRe).optional(),
-    heureDebut: z.string().regex(hmRe).optional(),
-    heureFin: z.string().regex(hmRe).optional(),
+    heureDebut: z
+      .string()
+      .regex(hmRe)
+      .refine(heureDansPlage, messagePlage)
+      .optional(),
+    heureFin: z
+      .string()
+      .regex(hmRe)
+      .refine(heureDansPlage, messagePlage)
+      .optional(),
     type: typeSchema.optional(),
     lieu: z.string().trim().min(1).max(300).optional(),
     capacite: z.number().int().positive().max(100).nullable().optional(),
@@ -181,8 +227,15 @@ export const presetInputSchema = z
   .object({
     label: z.string().trim().min(1, "Libellé requis.").max(120),
     type: typeSchema.default("collectif"),
-    dureeMin: z.number().int().positive().max(600),
-    heureDebut: z.string().regex(hmRe, "Heure attendue au format HH:MM."),
+    dureeMin: z
+      .number()
+      .int()
+      .min(DUREE_MIN, `Durée minimale ${DUREE_MIN} min.`)
+      .max(DUREE_MAX, `Durée maximale ${DUREE_MAX} min.`),
+    heureDebut: z
+      .string()
+      .regex(hmRe, "Heure attendue au format HH:MM.")
+      .refine(heureDansPlage, messagePlage),
     lieu: z.string().trim().min(1).max(300).default(LIEU_DEFAUT),
     capacite: z.number().int().positive().max(100).nullable().optional(),
     recurrence: recurrenceSchema.nullable().optional(),
@@ -218,25 +271,37 @@ export const blockDaySchema = z
 export type BlockDayInput = z.infer<typeof blockDaySchema>;
 
 // ============================================================================
-// Cohérence temporelle (fin > début)
+// Cohérence temporelle (fin > début + durée dans les bornes métier)
 // ============================================================================
 
-/** Minutes depuis minuit pour « HH:MM ». */
-function minutesOfDay(hm: string): number {
-  const [h, m] = hm.split(":").map(Number);
-  return h * 60 + m;
-}
-
 /**
- * Vérifie que `heureFin` est STRICTEMENT après `heureDebut` (même jour).
- * @returns `null` si OK, sinon un message d'erreur.
+ * Vérifie la cohérence horaire d'un créneau « à la volée » :
+ *   1. `heureFin` STRICTEMENT après `heureDebut` (même jour) ;
+ *   2. durée comprise dans [DUREE_MIN..DUREE_MAX] (garde-fou anti-faute-de-frappe :
+ *      pas de séance de 5 min ni de 6 h posée par erreur).
+ *
+ * Les bornes HORAIRES (plage HEURE_MIN..HEURE_MAX) sont déjà imposées en amont
+ * par `creneauInputSchema` / `creneauPatchSchema` (refine sur chaque heure) ; on
+ * ne les recontrôle pas ici. Cette fonction se concentre sur la cohérence du
+ * COUPLE (début/fin) que le schéma ne peut pas exprimer champ par champ.
+ *
+ * @returns `null` si OK, sinon un message d'erreur prêt à renvoyer (400).
  */
 export function validerCoherence(
   heureDebut: string,
   heureFin: string,
 ): string | null {
-  if (minutesOfDay(heureFin) <= minutesOfDay(heureDebut)) {
+  const debut = minutesDepuisMinuit(heureDebut);
+  const fin = minutesDepuisMinuit(heureFin);
+  if (fin <= debut) {
     return "L'heure de fin doit être après l'heure de début.";
+  }
+  const duree = fin - debut;
+  if (duree < DUREE_MIN) {
+    return `La durée doit être d'au moins ${DUREE_MIN} minutes.`;
+  }
+  if (duree > DUREE_MAX) {
+    return `La durée ne peut pas dépasser ${DUREE_MAX} minutes (${DUREE_MAX / 60} h).`;
   }
   return null;
 }

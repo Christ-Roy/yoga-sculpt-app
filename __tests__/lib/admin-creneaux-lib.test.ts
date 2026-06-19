@@ -125,6 +125,67 @@ describe("cohérence horaire (fin > début)", () => {
   });
 });
 
+describe("bornes métier (garde-fou anti-faute-de-frappe)", () => {
+  it("validerCoherence refuse une durée trop courte (< 15 min)", () => {
+    expect(validerCoherence("18:00", "18:10")).not.toBeNull();
+  });
+  it("validerCoherence accepte la durée minimale (15 min)", () => {
+    expect(validerCoherence("18:00", "18:15")).toBeNull();
+  });
+  it("validerCoherence refuse une durée trop longue (> 240 min)", () => {
+    // 09:00 → 14:00 = 300 min > 240.
+    expect(validerCoherence("09:00", "14:00")).not.toBeNull();
+  });
+  it("validerCoherence accepte la durée maximale (240 min)", () => {
+    expect(validerCoherence("10:00", "14:00")).toBeNull();
+  });
+
+  it("le schéma refuse une heure de début hors plage (03:00)", () => {
+    const r = creneauInputSchema.safeParse({
+      date: "2026-07-03",
+      heureDebut: "03:00",
+      heureFin: "04:00",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("le schéma refuse une heure de fin après 22:00 (23:00)", () => {
+    const r = creneauInputSchema.safeParse({
+      date: "2026-07-03",
+      heureDebut: "21:00",
+      heureFin: "23:00",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("le schéma accepte les bornes incluses (06:00 / 22:00)", () => {
+    const r = creneauInputSchema.safeParse({
+      date: "2026-07-03",
+      heureDebut: "06:00",
+      heureFin: "08:00",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("le preset refuse une durée absurde (dureeMin = 600)", () => {
+    const r = presetInputSchema.safeParse({
+      label: "Atelier marathon",
+      dureeMin: 600,
+      heureDebut: "18:00",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("le preset refuse une heure de début hors plage (05:00)", () => {
+    const r = presetInputSchema.safeParse({
+      label: "Trop tôt",
+      dureeMin: 60,
+      heureDebut: "05:00",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("encodage du type dans le summary (contrat reservation.ts)", () => {
   it("collectif → summary SANS le mot 'particulier'", () => {
     const s = buildSummary("collectif");
