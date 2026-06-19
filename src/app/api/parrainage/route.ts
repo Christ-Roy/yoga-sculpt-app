@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getOrCreateCode } from "@/lib/referral";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("parrainage");
 
 /**
  * GET /api/parrainage — état du parrainage du membre connecté.
@@ -61,7 +64,7 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (rowsErr) {
-    console.error("[parrainage] Lecture referrals échouée :", rowsErr.message);
+    log.error("Lecture referrals échouée", { db: rowsErr.message });
     return NextResponse.json(
       { error: "Impossible de charger vos filleuls." },
       { status: 500 },

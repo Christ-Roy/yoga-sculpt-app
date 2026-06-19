@@ -10,6 +10,11 @@ import {
 } from "@/lib/google-calendar";
 import { logEvent } from "@/lib/events";
 import { notifierAlice } from "@/lib/notify-alice";
+import {
+  getUserGclid,
+  recordAdsConversion,
+  FREE_TICKET_VALUE_EUR,
+} from "@/lib/ads-attribution";
 import type { Booking, Ticket, TicketType } from "@/lib/db-types";
 import {
   bornEventToIso,
@@ -294,6 +299,8 @@ export async function POST(request: Request) {
     { source: "reserver", service },
   );
 
+  await attribuerTicketGratuitConsomme(service, user.id, ticket, booking.id);
+
   return NextResponse.json({ ok: true, booking });
 }
 
@@ -488,6 +495,8 @@ async function reserverParticulierLibre(
     { source: "reserver", service },
   );
 
+  await attribuerTicketGratuitConsomme(service, user.id, ticket, booking.id);
+
   return NextResponse.json({ ok: true, booking });
 }
 
@@ -503,6 +512,30 @@ async function reserverParticulierLibre(
  *          `{ error: true }` sur ERREUR DB (→ 500 : on ne dit PAS « rachetez un
  *          ticket » à un client qui en a peut-être un, sur un simple blip DB).
  */
+/**
+ * ATTRIBUTION ADS — TICKET GRATUIT CONSOMMÉ.
+ * Si la résa consomme un ticket GRATUIT (welcome/referral), on enregistre une
+ * conversion ~10€ (≈ valeur d'une séance) attribuée au gclid du user. On ne compte
+ * PAS les tickets `paid` ici (déjà comptés comme `purchase` au webhook Stripe) ni
+ * `admin`. Idempotent sur booking_id (une résa = une conversion). Best-effort.
+ */
+async function attribuerTicketGratuitConsomme(
+  service: SupabaseClient,
+  userId: string,
+  ticket: Ticket,
+  bookingId: string,
+): Promise<void> {
+  if (ticket.source !== "welcome" && ticket.source !== "referral") return;
+  const gclid = await getUserGclid(service, userId);
+  await recordAdsConversion(service, {
+    userId,
+    kind: "free_ticket_used",
+    sourceRef: bookingId,
+    gclid,
+    valueEur: FREE_TICKET_VALUE_EUR,
+  });
+}
+
 async function selectionnerTicket(
   service: SupabaseClient,
   userId: string,

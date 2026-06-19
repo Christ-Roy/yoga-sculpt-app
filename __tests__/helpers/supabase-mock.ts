@@ -60,10 +60,22 @@ const DEFAULT_RESULT: SupabaseResult = { data: null, error: null };
 export interface MockSupabase {
   client: {
     from: ReturnType<typeof vi.fn>;
-    auth: { getUser: ReturnType<typeof vi.fn> };
+    auth: {
+      getUser: ReturnType<typeof vi.fn>;
+      admin: { getUserById: ReturnType<typeof vi.fn> };
+    };
   };
   /** Programme la réponse de la prochaine op `op` sur `table` (FIFO). */
   queueResult: (table: string, op: Op, result: SupabaseResult) => void;
+  /**
+   * Programme la prochaine réponse de `auth.admin.getUserById` (FIFO). Sert au
+   * lookup public du parrain (avatar dans raw_user_meta_data). Sans programmation
+   * → renvoie `{ data: { user: null }, error: null }`.
+   */
+  queueAdminUser: (result: {
+    data: { user: unknown } | null;
+    error: { message: string } | null;
+  }) => void;
   /** Trace de chaque op exécutée (table, op, payload + options éventuels). */
   calls: Array<{ table: string; op: Op; payload?: unknown; options?: unknown }>;
 }
@@ -164,10 +176,23 @@ export function makeSupabaseMock(
     return builder;
   }
 
+  // File FIFO des réponses de auth.admin.getUserById (lookup avatar parrain).
+  const adminUserQueue: Array<{
+    data: { user: unknown } | null;
+    error: { message: string } | null;
+  }> = [];
+
   const client = {
     from: vi.fn((table: string) => makeBuilder(table)),
     auth: {
       getUser: vi.fn(async () => ({ data: { user }, error: null })),
+      admin: {
+        getUserById: vi.fn(async () =>
+          adminUserQueue.length > 0
+            ? adminUserQueue.shift()
+            : { data: { user: null }, error: null },
+        ),
+      },
     },
   };
 
@@ -179,6 +204,9 @@ export function makeSupabaseMock(
       const q = queues.get(k) ?? [];
       q.push(result);
       queues.set(k, q);
+    },
+    queueAdminUser(result) {
+      adminUserQueue.push(result);
     },
   };
 }

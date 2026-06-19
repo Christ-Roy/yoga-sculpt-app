@@ -14,6 +14,9 @@
  */
 
 import { createServiceClient } from "@/lib/supabase/service";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("insights");
 
 // ============================================================================
 // Types exposés à l'UI
@@ -126,7 +129,7 @@ export async function chargerInsights(): Promise<InsightsData> {
   // --- Funnel global ------------------------------------------------------
   let funnel: FunnelGlobal = FUNNEL_VIDE;
   if (funnelRes.error) {
-    console.error("[insights] v_funnel_global indisponible :", funnelRes.error.message);
+    log.error("v_funnel_global indisponible", { db: funnelRes.error.message });
   } else if (funnelRes.data) {
     const f = funnelRes.data as Record<string, unknown>;
     funnel = {
@@ -145,7 +148,7 @@ export async function chargerInsights(): Promise<InsightsData> {
 
   // --- Signaux par user ---------------------------------------------------
   if (usersRes.error) {
-    console.error("[insights] v_user_signals indisponible :", usersRes.error.message);
+    log.error("v_user_signals indisponible", { db: usersRes.error.message });
   }
   const usersRaw = (usersRes.data ?? []) as Array<Record<string, unknown>>;
 
@@ -178,10 +181,9 @@ export async function chargerInsights(): Promise<InsightsData> {
 
   // --- Checkouts abandonnés (avec libellé client) -------------------------
   if (abandonsRes.error) {
-    console.error(
-      "[insights] v_user_checkout_abandons indisponible :",
-      abandonsRes.error.message,
-    );
+    log.error("v_user_checkout_abandons indisponible", {
+      db: abandonsRes.error.message,
+    });
   }
   const abandons: CheckoutAbandon[] = (
     (abandonsRes.data ?? []) as Array<Record<string, unknown>>
@@ -200,10 +202,9 @@ export async function chargerInsights(): Promise<InsightsData> {
 
   // --- Volume d'events 30j ------------------------------------------------
   if (events30jRes.error) {
-    console.error(
-      "[insights] v_funnel_events_30j indisponible :",
-      events30jRes.error.message,
-    );
+    log.error("v_funnel_events_30j indisponible", {
+      db: events30jRes.error.message,
+    });
   }
   const events30j: EventVolume30j[] = (
     (events30jRes.data ?? []) as Array<Record<string, unknown>>

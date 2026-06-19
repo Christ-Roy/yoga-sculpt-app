@@ -19,7 +19,10 @@
  */
 
 import { createServiceClient } from "@/lib/supabase/service";
+import { createLogger } from "@/lib/log";
 import type { TicketType, BookingStatus } from "@/lib/db-types";
+
+const log = createLogger("comptes/data");
 
 /** Provider d'authentification résolu pour l'affichage. */
 export type AuthProvider = "google" | "azure" | "email" | "autre";
@@ -168,7 +171,7 @@ export async function chargerComptes(
     perPage,
   });
   if (error) {
-    console.error("[comptes/data] listUsers a échoué :", error.message);
+    log.error("listUsers a échoué", { db: error.message });
     return { comptes: [], total: 0, page: pageSafe, perPage };
   }
 

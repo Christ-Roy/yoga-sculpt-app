@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { insertEvent } from "@/lib/google-calendar";
 import { blockDaySchema } from "../lib";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/creneaux/block");
 
 /**
  * POST /api/admin/creneaux/block — bloque une journée (jour OFF).
@@ -65,7 +68,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, eventId: created.id }, { status: 201 });
   } catch (err) {
-    console.error("[admin/creneaux/block] Création event OFF échouée :", err);
+    log.error("Création event OFF échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Blocage de la journée impossible." },
       { status: 502 },

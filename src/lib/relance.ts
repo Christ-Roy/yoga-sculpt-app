@@ -41,6 +41,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendTransactionalEmail } from "@/lib/brevo";
 import { logEvent } from "@/lib/events";
 import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("relance");
 
 // ============================================================================
 // Constantes — fenêtres temporelles & garde-fous (configurables ici)
@@ -317,7 +320,7 @@ async function chargerProfilsCandidats(
     .limit(LOT_MAX * 5);
 
   if (error) {
-    console.error("[relance] Chargement des profils échoué :", error.message);
+    log.error("Chargement des profils échoué", { db: error.message });
     return [];
   }
   return (data ?? []) as ProfilRelance[];
@@ -341,7 +344,7 @@ async function chargerBookings(
     .in("user_id", userIds);
 
   if (error) {
-    console.error("[relance] Chargement des bookings échoué :", error.message);
+    log.error("Chargement des bookings échoué", { db: error.message });
     return map;
   }
   for (const b of (data ?? []) as BookingScan[]) {
@@ -372,7 +375,7 @@ async function chargerSoldesTickets(
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
 
   if (error) {
-    console.error("[relance] Chargement des tickets échoué :", error.message);
+    log.error("Chargement des tickets échoué", { db: error.message });
     return map;
   }
   for (const t of (data ?? []) as TicketScan[]) {
@@ -486,10 +489,11 @@ async function envoyerRelance(
       textContent: text,
     });
   } catch (err) {
-    console.error(
-      `[relance] ${segment} : envoi échoué pour ${email} (user=${profil.id}) :`,
-      err,
-    );
+    log.error("envoi échoué", {
+      segment,
+      user_id: profil.id,
+      err: serializeError(err),
+    });
     return false;
   }
 
@@ -501,10 +505,9 @@ async function envoyerRelance(
     .eq("id", profil.id);
 
   if (updErr) {
-    console.error(
-      `[relance] ${segment} : email envoyé mais horodatage ${colonne} échoué ` +
-        `pour user=${profil.id} (risque de doublon au prochain cooldown) :`,
-      updErr.message,
+    log.error(
+      "email envoyé mais horodatage échoué (risque de doublon au prochain cooldown)",
+      { segment, colonne, user_id: profil.id, db: updErr.message },
     );
     // L'email est PARTI : on le compte comme envoyé (best-effort tracking).
   }
@@ -545,7 +548,7 @@ export async function scanAndSendRelances(
 
   const profils = await chargerProfilsCandidats(service, nowIso);
   if (profils.length === 0) {
-    console.info("[relance] Aucun profil candidat à relancer.");
+    log.info("Aucun profil candidat à relancer");
     return resultat;
   }
 
@@ -577,11 +580,12 @@ export async function scanAndSendRelances(
     else resultat.ticketDormant += 1;
   }
 
-  console.info(
-    `[relance] Passage terminé — jamais_reserve: ${resultat.jamaisReserve}, ` +
-      `dormant: ${resultat.dormant}, ticket_dormant: ${resultat.ticketDormant}, ` +
-      `erreurs: ${resultat.erreurs}.`,
-  );
+  log.info("Passage terminé", {
+    jamais_reserve: resultat.jamaisReserve,
+    dormant: resultat.dormant,
+    ticket_dormant: resultat.ticketDormant,
+    erreurs: resultat.erreurs,
+  });
 
   return resultat;
 }

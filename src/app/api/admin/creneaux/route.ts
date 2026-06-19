@@ -24,6 +24,9 @@ import {
   type CreneauPatch,
 } from "./lib";
 import { compterReservations } from "./data";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/creneaux");
 
 /**
  * /api/admin/creneaux — CRUD des créneaux dans le Google Calendar d'Alice.
@@ -73,7 +76,7 @@ export async function GET() {
       maxResults: 250,
     });
   } catch (err) {
-    console.error("[admin/creneaux] Lecture agenda échouée :", err);
+    log.error("Lecture agenda échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Impossible de charger l'agenda." },
       { status: 502 },
@@ -88,7 +91,7 @@ export async function GET() {
       try {
         inscrits = await compterReservations(event.id);
       } catch (err) {
-        console.error("[admin/creneaux] Comptage inscrits échoué :", err);
+        log.error("Comptage inscrits échoué", { err: serializeError(err) });
       }
     }
     const creneau = eventVersCreneau(event, inscrits);
@@ -131,7 +134,7 @@ export async function POST(request: Request) {
     const creneau = eventVersCreneau(created, 0);
     return NextResponse.json({ ok: true, creneau }, { status: 201 });
   } catch (err) {
-    console.error("[admin/creneaux] Création event échouée :", err);
+    log.error("Création event échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Création du créneau impossible." },
       { status: 502 },
@@ -169,7 +172,7 @@ export async function PATCH(request: Request) {
     if (estIntrouvable(err)) {
       return NextResponse.json({ error: "Créneau introuvable." }, { status: 404 });
     }
-    console.error("[admin/creneaux] Lecture event échouée :", err);
+    log.error("Lecture event échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Service agenda indisponible." },
       { status: 502 },
@@ -245,7 +248,7 @@ export async function PATCH(request: Request) {
     if (estIntrouvable(err)) {
       return NextResponse.json({ error: "Créneau introuvable." }, { status: 404 });
     }
-    console.error("[admin/creneaux] Édition event échouée :", err);
+    log.error("Édition event échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Édition du créneau impossible." },
       { status: 502 },
@@ -278,7 +281,7 @@ export async function DELETE(request: Request) {
   try {
     inscrits = await compterReservations(eventId);
   } catch (err) {
-    console.error("[admin/creneaux] Comptage avant suppression échoué :", err);
+    log.error("Comptage avant suppression échoué", { err: serializeError(err) });
   }
 
   if (inscrits > 0 && !force) {
@@ -300,7 +303,7 @@ export async function DELETE(request: Request) {
       // Idempotent : déjà supprimé côté Google → on considère l'opération faite.
       return NextResponse.json({ ok: true, inscrits, alreadyDeleted: true });
     }
-    console.error("[admin/creneaux] Suppression event échouée :", err);
+    log.error("Suppression event échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Suppression du créneau impossible." },
       { status: 502 },

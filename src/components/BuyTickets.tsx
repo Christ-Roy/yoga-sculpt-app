@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { TicketType } from "@/lib/db-types";
+import { Spinner } from "@/components/ui/spinner";
 
 /**
  * Achat de tickets — 3 formules (remplace/complète `BuyTicketButton.tsx`).
@@ -127,10 +128,17 @@ export function BuyTickets({
                 type="button"
                 onClick={() => acheter(f.formule)}
                 disabled={pending}
-                className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-[4px] bg-accent px-4 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-[4px] bg-accent px-4 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 aria-label={`Acheter ${f.titre} (${f.prix})`}
               >
-                {busy ? "Un instant…" : "Acheter"}
+                {busy ? (
+                  <>
+                    <Spinner />
+                    Un instant…
+                  </>
+                ) : (
+                  "Acheter"
+                )}
               </button>
             </div>
           );

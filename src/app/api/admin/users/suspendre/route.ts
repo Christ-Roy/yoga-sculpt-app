@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
+import { createLogger, serializeError } from "@/lib/log";
 import { suspendBodySchema } from "../_lib/validation";
 import {
   suspendreCompte,
   reactiverCompte,
   lireUtilisateur,
 } from "../_lib/auth-admin";
+
+const log = createLogger("admin/suspendre");
 
 /**
  * POST /api/admin/users/suspendre — SUSPEND ou RÉACTIVE un compte.
@@ -73,9 +76,11 @@ export async function POST(request: Request) {
       await reactiverCompte(body.userId);
     }
 
-    console.log(
-      `[admin/suspendre] ${admin.email} → ${body.suspendre ? "suspend" : "réactive"} ${body.userId}.`,
-    );
+    log.info("Admin a modifié le statut d'un compte", {
+      adminId: admin.userId,
+      cibleId: body.userId,
+      action: body.suspendre ? "suspend" : "reactive",
+    });
 
     return NextResponse.json({
       ok: true,
@@ -83,7 +88,7 @@ export async function POST(request: Request) {
       message: body.suspendre ? "Compte suspendu." : "Compte réactivé.",
     });
   } catch (err) {
-    console.error("[admin/suspendre] GoTrue a échoué :", err);
+    log.error("GoTrue a échoué", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Opération impossible. Réessayez." },
       { status: 500 },

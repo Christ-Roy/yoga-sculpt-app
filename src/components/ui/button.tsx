@@ -34,24 +34,75 @@ const buttonVariants = cva(
   },
 );
 
+/**
+ * Spinner inline pour l'état `loading` du bouton (charte or, hérite `currentColor`).
+ * `aria-hidden` : l'état occupé est porté par `aria-busy`/`disabled` sur le bouton.
+ * Coupé sous prefers-reduced-motion (pas d'anim de rotation imposée).
+ */
+function ButtonSpinner() {
+  return (
+    <svg
+      className="size-4 motion-safe:animate-spin"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+      />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M12 2a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7V2z"
+      />
+    </svg>
+  );
+}
+
 function Button({
   className,
   variant,
   size,
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
+    /** Affiche un spinner inline et désactive le bouton pendant une action async. */
+    loading?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";
+
+  // `asChild` + spinner injecté casserait Slot (exige un seul enfant) → en mode
+  // asChild on n'injecte pas de spinner, on rend l'enfant tel quel.
+  const content =
+    loading && !asChild ? (
+      <>
+        <ButtonSpinner />
+        {children}
+      </>
+    ) : (
+      children
+    );
 
   return (
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      disabled={asChild ? undefined : disabled || loading}
+      aria-busy={loading || undefined}
       {...props}
-    />
+    >
+      {content}
+    </Comp>
   );
 }
 

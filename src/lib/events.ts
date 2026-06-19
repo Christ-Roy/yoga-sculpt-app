@@ -28,6 +28,9 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("events");
 
 /**
  * Types d'événements journalisés. Doit rester ALIGNÉ avec le CHECK de la
@@ -95,20 +98,20 @@ export async function logEvent(
     });
 
     if (error) {
-      console.error(
-        `[events] logEvent('${eventType}') échoué (non bloquant) :`,
-        error.message,
-      );
+      log.error("logEvent échoué (non bloquant)", {
+        event_type: eventType,
+        db: error.message,
+      });
       return false;
     }
     return true;
   } catch (err) {
     // Best-effort absolu : même createServiceClient() peut throw (env manquant).
     // On avale tout — le tracking ne doit JAMAIS faire échouer le flux métier.
-    console.error(
-      `[events] logEvent('${eventType}') exception (non bloquant) :`,
-      err,
-    );
+    log.error("logEvent exception (non bloquant)", {
+      event_type: eventType,
+      err: serializeError(err),
+    });
     return false;
   }
 }

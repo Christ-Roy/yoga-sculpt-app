@@ -1,31 +1,37 @@
-import { forwardRef } from "react";
 import type { ButtonHTMLAttributes } from "react";
+import { Button as UiButton } from "@/components/ui/button";
 
+/**
+ * Button — alias de compatibilité vers le bouton CANONIQUE `ui/button` (shadcn).
+ *
+ * Décision design system (QA 2026-06-19) : `ui/button` est le composant unique
+ * (cohérent avec sidebar/sheet/tooltip déjà shadcn, et porteur de l'état
+ * `loading`). On NE maintient plus deux implémentations divergentes.
+ *
+ * Ce wrapper conserve l'API historique (`variant: primary|secondary|ghost`)
+ * pour les écrans qui l'utilisent (LoginForm/AuthMethods, OnboardingFlow,
+ * ProfileCard) en la mappant 1:1 sur les variants shadcn — RENDU IDENTIQUE :
+ *   - primary   → default  (bg-accent / texte sombre)
+ *   - secondary → outline  (bordure + bg-surface + hover or)  ← PAS `secondary`
+ *                 shadcn, qui est bg-surface-2 et diffère du rendu historique.
+ *   - ghost     → ghost
+ *
+ * Préférer importer directement `@/components/ui/button` dans tout NOUVEau code.
+ */
 type Variant = "primary" | "secondary" | "ghost";
 
-const base =
-  "inline-flex items-center justify-center gap-2 rounded-[4px] px-5 py-3 text-sm font-medium tracking-wide transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-
-const variants: Record<Variant, string> = {
-  primary:
-    "bg-accent text-[#0e0e0e] hover:bg-accent-dark active:bg-accent-dark",
-  secondary:
-    "border border-border bg-surface text-text hover:border-accent/60 hover:bg-surface-2",
-  ghost: "text-text-secondary hover:text-text hover:bg-surface",
-};
+const VARIANT_MAP = {
+  primary: "default",
+  secondary: "outline",
+  ghost: "ghost",
+} as const;
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
+  /** Spinner inline + désactivation pendant une action async. */
+  loading?: boolean;
 }
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  function Button({ variant = "primary", className = "", ...props }, ref) {
-    return (
-      <button
-        ref={ref}
-        className={`${base} ${variants[variant]} ${className}`}
-        {...props}
-      />
-    );
-  },
-);
+export function Button({ variant = "primary", ...props }: ButtonProps) {
+  return <UiButton variant={VARIANT_MAP[variant]} {...props} />;
+}

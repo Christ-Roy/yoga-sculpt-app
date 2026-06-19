@@ -15,8 +15,11 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { listEvents } from "@/lib/google-calendar";
 import { deduireTypeDepuisEvent, fenetreCreneaux } from "@/lib/reservation";
+import { createLogger, serializeError } from "@/lib/log";
 import type { BookingStatus, TicketType } from "@/lib/db-types";
 import type { AttendanceValue } from "@/app/api/admin/bookings/_logic";
+
+const log = createLogger("admin/reservations");
 
 // ============================================================================
 // Types exposés à l'UI
@@ -220,7 +223,7 @@ async function chargerCreneauxGoogle(maintenant: Date) {
     const { timeMin, timeMax } = fenetreCreneaux(maintenant);
     return await listEvents({ timeMin, timeMax, maxResults: 250 });
   } catch (err) {
-    console.error("[admin/reservations] listEvents indisponible :", err);
+    log.error("listEvents indisponible", { err: serializeError(err) });
     return [];
   }
 }

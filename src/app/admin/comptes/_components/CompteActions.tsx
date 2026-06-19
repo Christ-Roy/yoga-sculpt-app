@@ -42,6 +42,8 @@ export function CompteActions({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  // Clé de l'action en cours (pour cibler le spinner sur le bon bouton).
+  const [actionEnCours, setActionEnCours] = useState<string | null>(null);
 
   // — Formulaire tickets —
   const [sens, setSens] = useState<Sens>("credit");
@@ -50,6 +52,7 @@ export function CompteActions({
 
   /** Wrapper d'appel API + feedback + refresh des données serveur. */
   async function appeler(
+    cle: string,
     url: string,
     body: unknown,
     okMessage?: string,
@@ -57,6 +60,7 @@ export function CompteActions({
   ) {
     if (confirmer && !window.confirm(confirmer)) return;
     setFeedback(null);
+    setActionEnCours(cle);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -81,10 +85,14 @@ export function CompteActions({
       startTransition(() => router.refresh());
     } catch {
       setFeedback({ ok: false, message: "Erreur réseau. Réessayez." });
+    } finally {
+      setActionEnCours(null);
     }
   }
 
-  const disabled = pending;
+  // Une action API ou un refresh en cours bloque toutes les actions ; le spinner
+  // ne s'affiche que sur le bouton réellement déclenché.
+  const busy = pending || actionEnCours !== null;
 
   return (
     <section
@@ -162,9 +170,11 @@ export function CompteActions({
           <Button
             type="button"
             variant={sens === "debit" ? "destructive" : "default"}
-            disabled={disabled}
+            disabled={busy}
+            loading={actionEnCours === "tickets"}
             onClick={() =>
               appeler(
+                "tickets",
                 "/api/admin/users/tickets",
                 { userId, type, sens, quantite, opId: crypto.randomUUID() },
                 undefined,
@@ -186,9 +196,10 @@ export function CompteActions({
           <Button
             type="button"
             variant="outline"
-            disabled={disabled}
+            disabled={busy}
+            loading={actionEnCours === "recovery"}
             onClick={() =>
-              appeler("/api/admin/users/auth-action", {
+              appeler("recovery", "/api/admin/users/auth-action", {
                 userId,
                 action: "recovery",
               })
@@ -199,9 +210,10 @@ export function CompteActions({
           <Button
             type="button"
             variant="outline"
-            disabled={disabled}
+            disabled={busy}
+            loading={actionEnCours === "magiclink"}
             onClick={() =>
-              appeler("/api/admin/users/auth-action", {
+              appeler("magiclink", "/api/admin/users/auth-action", {
                 userId,
                 action: "magiclink",
               })
@@ -220,9 +232,11 @@ export function CompteActions({
             <Button
               type="button"
               variant="default"
-              disabled={disabled}
+              disabled={busy}
+              loading={actionEnCours === "suspendre"}
               onClick={() =>
                 appeler(
+                  "suspendre",
                   "/api/admin/users/suspendre",
                   { userId, suspendre: false },
                   "Compte réactivé.",
@@ -235,9 +249,11 @@ export function CompteActions({
             <Button
               type="button"
               variant="destructive"
-              disabled={disabled}
+              disabled={busy}
+              loading={actionEnCours === "suspendre"}
               onClick={() =>
                 appeler(
+                  "suspendre",
                   "/api/admin/users/suspendre",
                   { userId, suspendre: true },
                   "Compte suspendu.",

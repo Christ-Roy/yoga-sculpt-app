@@ -245,6 +245,88 @@ describe("POST /api/webhooks/stripe", () => {
     expect(res.status).toBe(500);
   });
 
+  it("ATTRIBUTION ADS : écrit la conversion purchase quand le user a un gclid (paiement → Google)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // Session payée AVEC amount_total (2000 centimes = 20 €).
+    const body = JSON.stringify({
+      id: "evt_ads_ok",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_ads",
+          client_reference_id: "user-1",
+          payment_intent: "pi_ads",
+          payment_status: "paid",
+          amount_total: 2000,
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    // getUserGclid → le profil porte un gclid (user venu d'un clic Ads).
+    serviceMock.queueResult("profiles", "select", {
+      data: { gclid: "GCLID_TEST_ABC" },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+
+    // Une conversion purchase doit être enregistrée (journal ads_conversions),
+    // attribuée au gclid, valeur = montant payé, idempotente sur (kind, source_ref).
+    const conv = serviceMock.calls.find(
+      (c) => c.table === "ads_conversions" && c.op === "upsert",
+    );
+    expect(conv).toBeDefined();
+    expect(conv?.payload).toMatchObject({
+      user_id: "user-1",
+      kind: "purchase",
+      source_ref: "cs_ads",
+      gclid: "GCLID_TEST_ABC",
+      value_eur: 20,
+      uploaded: false,
+    });
+    expect(conv?.options).toMatchObject({
+      onConflict: "kind,source_ref",
+      ignoreDuplicates: true,
+    });
+  });
+
+  it("ATTRIBUTION ADS : N'écrit AUCUNE conversion quand le user n'a pas de gclid (pas venu de l'Ads)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_ads_nogclid",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_nogclid",
+          client_reference_id: "user-1",
+          payment_intent: "pi_x",
+          payment_status: "paid",
+          amount_total: 2000,
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    // getUserGclid → profil SANS gclid.
+    serviceMock.queueResult("profiles", "select", {
+      data: { gclid: null },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    // Aucune écriture dans ads_conversions (rien à attribuer).
+    expect(
+      serviceMock.calls.find((c) => c.table === "ads_conversions"),
+    ).toBeUndefined();
+  });
+
   it("accepte le fallback client_reference_id quand metadata.user_id est absent", async () => {
     const now = Math.floor(Date.now() / 1000);
     const body = JSON.stringify({

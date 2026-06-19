@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Spinner } from "@/components/ui/spinner";
 
 /**
  * Formulaire d'invitation d'un ami au parrainage.
@@ -104,9 +105,16 @@ export function InviteAmiForm({
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          {pending ? "Envoi…" : "Inviter"}
+          {pending ? (
+            <>
+              <Spinner />
+              Envoi…
+            </>
+          ) : (
+            "Inviter"
+          )}
         </button>
       </div>
 

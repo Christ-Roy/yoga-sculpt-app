@@ -15,7 +15,8 @@ import {
 import type { SeanceAgenda } from "@/lib/calendar-export";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { LieuMaps } from "@/components/LieuMaps";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast } from "@/components/ui/toast";
+import { Spinner } from "@/components/ui/spinner";
 import { WidgetCard, WidgetEmpty } from "@/components/espace/WidgetCard";
 
 /**
@@ -63,10 +64,7 @@ export function SeancesAVenirWidget({
 }) {
   const [seances, setSeances] = useState<SeanceWidget[]>(seancesInitiales);
   const [enCours, setEnCours] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: ToastVariant;
-  } | null>(null);
+  const { toast } = useToast();
 
   async function annuler(s: SeanceWidget) {
     setEnCours(s.id);
@@ -78,31 +76,25 @@ export function SeancesAVenirWidget({
       });
       if (res.ok) {
         setSeances((list) => list.filter((x) => x.id !== s.id));
-        setToast({ message: "Réservation annulée.", variant: "success" });
+        toast("Réservation annulée.", "success");
         return;
       }
       if (res.status === 404) {
         setSeances((list) => list.filter((x) => x.id !== s.id));
-        setToast({ message: "Réservation introuvable.", variant: "error" });
+        toast("Réservation introuvable.", "error");
         return;
       }
       if (res.status === 409) {
-        setToast({
-          message: "Annulation impossible à moins de 24h du cours.",
-          variant: "error",
-        });
+        toast("Annulation impossible à moins de 24h du cours.", "error");
         return;
       }
       if (res.status === 403) {
-        setToast({
-          message: "Cette réservation ne vous appartient pas.",
-          variant: "error",
-        });
+        toast("Cette réservation ne vous appartient pas.", "error");
         return;
       }
-      setToast({ message: "L'annulation a échoué. Réessayez.", variant: "error" });
+      toast("L'annulation a échoué. Réessayez.", "error");
     } catch {
-      setToast({ message: "Problème de connexion. Réessayez.", variant: "error" });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setEnCours(null);
     }
@@ -179,9 +171,16 @@ export function SeancesAVenirWidget({
                         ? "Annulation impossible (moins de 24h avant la séance)"
                         : `Annuler la réservation du ${formaterDateLongueFr(s.starts_at)}`
                     }
-                    className="inline-flex min-h-[36px] items-center justify-center rounded-[4px] border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-red-500/50 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                    className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-[4px] border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-red-500/50 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
-                    {enCours === s.id ? "Annulation…" : "Annuler"}
+                    {enCours === s.id ? (
+                      <>
+                        <Spinner className="size-3.5" />
+                        Annulation…
+                      </>
+                    ) : (
+                      "Annuler"
+                    )}
                   </button>
                 </div>
 
@@ -207,14 +206,6 @@ export function SeancesAVenirWidget({
             </li>
           )}
         </ul>
-      )}
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
       )}
     </WidgetCard>
   );

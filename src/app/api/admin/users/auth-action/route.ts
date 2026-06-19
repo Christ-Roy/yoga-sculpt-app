@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
+import { createLogger, serializeError } from "@/lib/log";
 import { authActionBodySchema } from "../_lib/validation";
 import {
   genererLienRecovery,
   genererLienMagic,
   lireUtilisateur,
 } from "../_lib/auth-admin";
+
+const log = createLogger("admin/auth-action");
 
 /**
  * POST /api/admin/users/auth-action — génère un lien d'auth pour un compte.
@@ -66,9 +69,11 @@ export async function POST(request: Request) {
         ? await genererLienRecovery(email)
         : await genererLienMagic(email);
 
-    console.log(
-      `[admin/auth-action] ${admin.email} → ${body.action} pour ${body.userId}.`,
-    );
+    log.info("Admin a généré un lien d'auth", {
+      adminId: admin.userId,
+      cibleId: body.userId,
+      action: body.action,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -80,7 +85,7 @@ export async function POST(request: Request) {
           : "Magic-link de connexion généré. Copiez-le et transmettez-le au membre.",
     });
   } catch (err) {
-    console.error("[admin/auth-action] GoTrue a échoué :", err);
+    log.error("GoTrue a échoué", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Génération du lien impossible. Réessayez." },
       { status: 500 },

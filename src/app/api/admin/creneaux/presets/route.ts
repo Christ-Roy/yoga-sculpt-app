@@ -7,6 +7,9 @@ import {
   majPreset,
   supprimerPreset,
 } from "../data";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/creneaux/presets");
 
 /**
  * /api/admin/creneaux/presets — CRUD des PRESETS (modèles de créneaux).
@@ -40,7 +43,7 @@ export async function GET() {
     const presets = await listerPresets();
     return NextResponse.json({ presets });
   } catch (err) {
-    console.error("[admin/creneaux/presets] Lecture échouée :", err);
+    log.error("Lecture échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Impossible de charger les modèles." },
       { status: 500 },
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({ ok: true, preset }, { status: 201 });
   } catch (err) {
-    console.error("[admin/creneaux/presets] Création échouée :", err);
+    log.error("Création échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Création du modèle impossible." },
       { status: 500 },
@@ -144,7 +147,7 @@ export async function PATCH(request: Request) {
     }
     return NextResponse.json({ ok: true, preset });
   } catch (err) {
-    console.error("[admin/creneaux/presets] Édition échouée :", err);
+    log.error("Édition échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Édition du modèle impossible." },
       { status: 500 },
@@ -165,7 +168,7 @@ export async function DELETE(request: Request) {
     await supprimerPreset(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[admin/creneaux/presets] Suppression échouée :", err);
+    log.error("Suppression échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Suppression du modèle impossible." },
       { status: 500 },

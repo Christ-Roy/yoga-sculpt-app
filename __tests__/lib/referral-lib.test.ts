@@ -208,6 +208,156 @@ describe("prenomParrainParCode — landing d'invitation (lookup borné, no PII)"
   });
 });
 
+describe("parrainPublicParCode — landing enrichie (prénom + avatar + email)", () => {
+  it("code valide + nom + avatar + email → renvoie les 3 champs", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Emma Durand", email: "emma@x.fr" },
+      error: null,
+    });
+    service.queueAdminUser({
+      data: {
+        user: {
+          email: "emma@x.fr",
+          user_metadata: { avatar_url: "https://lh3.googleusercontent.com/a/emma" },
+        },
+      },
+      error: null,
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect(await parrainPublicParCode(service.client as never, "ABCD2345")).toEqual({
+      prenom: "Emma",
+      avatarUrl: "https://lh3.googleusercontent.com/a/emma",
+      email: "emma@x.fr",
+    });
+  });
+
+  it("avatar dans `picture` (claim Microsoft) si `avatar_url` absent", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Léa Martin", email: "lea@x.fr" },
+      error: null,
+    });
+    service.queueAdminUser({
+      data: {
+        user: {
+          email: "lea@x.fr",
+          user_metadata: { picture: "https://graph.microsoft.com/photo/lea" },
+        },
+      },
+      error: null,
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    const res = await parrainPublicParCode(service.client as never, "ABCD2345");
+    expect(res.avatarUrl).toBe("https://graph.microsoft.com/photo/lea");
+    expect(res.prenom).toBe("Léa");
+  });
+
+  it("avatar absent (magic-link, pas d'OAuth) → avatarUrl null mais prénom/email OK", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Paul Bernard", email: "paul@x.fr" },
+      error: null,
+    });
+    service.queueAdminUser({
+      data: { user: { email: "paul@x.fr", user_metadata: {} } },
+      error: null,
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect(await parrainPublicParCode(service.client as never, "ABCD2345")).toEqual({
+      prenom: "Paul",
+      avatarUrl: null,
+      email: "paul@x.fr",
+    });
+  });
+
+  it("avatar non-http (data:/javascript:) → rejeté (avatarUrl null)", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Ann", email: "ann@x.fr" },
+      error: null,
+    });
+    service.queueAdminUser({
+      data: {
+        user: {
+          email: "ann@x.fr",
+          user_metadata: { avatar_url: "javascript:alert(1)" },
+        },
+      },
+      error: null,
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect((await parrainPublicParCode(service.client as never, "ABCD2345")).avatarUrl).toBeNull();
+  });
+
+  it("email manquant sur profiles → fallback sur user.email (Admin API)", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Zoé", email: null },
+      error: null,
+    });
+    service.queueAdminUser({
+      data: {
+        user: {
+          email: "zoe@x.fr",
+          user_metadata: { avatar_url: "https://x/z.png" },
+        },
+      },
+      error: null,
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect((await parrainPublicParCode(service.client as never, "ABCD2345")).email).toBe(
+      "zoe@x.fr",
+    );
+  });
+
+  it("getUserById en ERREUR → fail-safe : prénom/email gardés, avatar null", async () => {
+    service.queueResult("profiles", "select", {
+      data: { id: PARRAIN, full_name: "Tom Roy", email: "tom@x.fr" },
+      error: null,
+    });
+    service.queueAdminUser({ data: null, error: { message: "admin down" } });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect(await parrainPublicParCode(service.client as never, "ABCD2345")).toEqual({
+      prenom: "Tom",
+      avatarUrl: null,
+      email: "tom@x.fr",
+    });
+  });
+
+  it("code inconnu (aucun profil) → tout null, AUCUN appel Admin API", async () => {
+    service.queueResult("profiles", "select", { data: null, error: null });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect(await parrainPublicParCode(service.client as never, "ZZZZ9999")).toEqual({
+      prenom: null,
+      avatarUrl: null,
+      email: null,
+    });
+    expect(service.client.auth.admin.getUserById).not.toHaveBeenCalled();
+  });
+
+  it("code INVALIDE → tout null SANS toucher la DB ni l'Admin API", async () => {
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    for (const bad of ["", "abc", "0O1ILo!!", null, undefined]) {
+      expect(await parrainPublicParCode(service.client as never, bad as never)).toEqual({
+        prenom: null,
+        avatarUrl: null,
+        email: null,
+      });
+    }
+    expect(service.calls.length).toBe(0);
+    expect(service.client.auth.admin.getUserById).not.toHaveBeenCalled();
+  });
+
+  it("erreur DB sur le SELECT profiles → tout null (fail-safe, ne throw pas)", async () => {
+    service.queueResult("profiles", "select", {
+      data: null,
+      error: { message: "permission denied" },
+    });
+    const { parrainPublicParCode } = await import("@/lib/referral");
+    expect(await parrainPublicParCode(service.client as never, "ABCD2345")).toEqual({
+      prenom: null,
+      avatarUrl: null,
+      email: null,
+    });
+  });
+});
+
 describe("completerReferral — fail-safes & idempotence concurrente", () => {
   const base = {
     code: CODE,
@@ -255,6 +405,46 @@ describe("completerReferral — fail-safes & idempotence concurrente", () => {
     expect(
       service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
     ).toBeUndefined();
+  });
+
+  it("credited:false quand le PLAFOND est atteint — aucun ticket crédité (anti-farming)", async () => {
+    // Plafond effectif = défaut métier 3 (pas de REFERRAL_MAX_CREDITS stubé).
+    queueResolution(); // parrain résolu
+    // pas de referral pending → on en crée un à la volée (traçabilité).
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    // comptage plafond : ce parrain a DÉJÀ 3 filleuls crédités → cap atteint.
+    service.queueResult("referrals", "select", { data: null, error: null, count: 3 });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: false,
+    });
+    // Le levier qui doit tenir : AUCUN ticket inséré au-delà du plafond.
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
+
+  it("le plafond se DESSERRE via REFERRAL_MAX_CREDITS (4 crédités < 5 → on crédite)", async () => {
+    // Surcharge env : plafond porté à 5. Avec 4 déjà crédités, le 5e passe.
+    vi.stubEnv("REFERRAL_MAX_CREDITS", "5");
+    queueResolution();
+    service.queueResult("referrals", "select", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null, count: 4 });
+    // crédit ticket OK + marquage referral OK.
+    service.queueResult("tickets", "insert", { data: null, error: null });
+    service.queueResult("referrals", "update", { data: { id: "ref-new" }, error: null });
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: true,
+    });
+    // Un ticket a bien été crédité (on était sous le plafond desserré).
+    expect(
+      service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeDefined();
   });
 
   it("credited:false si l'INSERT du ticket parrain échoue", async () => {

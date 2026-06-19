@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
+import { captureGclidOnProfile, parseGclidCookie } from "@/lib/ads-attribution";
 import { logEvent } from "@/lib/events";
 import { safeInternalRedirect } from "@/lib/auth-redirect";
 import { createLogger, serializeError } from "@/lib/log";
@@ -97,6 +98,17 @@ export async function GET(request: Request) {
         await enregistrerSignaux(service, { userId: user.id, ip });
 
         const cookieStore = await cookies();
+
+        // ── ATTRIBUTION ADS — capter le gclid first-touch (cookie ys_gclid posé
+        //    par la vitrine, scope Domain=.yoga-sculpt.fr). Best-effort, n'écrase
+        //    pas une attribution déjà posée. Sert à attribuer paiements + valeur
+        //    parrainage à ce clic Ads côté serveur (cf lib/ads-attribution).
+        await captureGclidOnProfile(
+          service,
+          user.id,
+          parseGclidCookie(cookieStore.get("ys_gclid")?.value),
+        );
+
         const refCode = cookieStore.get("ys_ref")?.value;
         if (refCode) {
           const result = await completerReferral(service, {

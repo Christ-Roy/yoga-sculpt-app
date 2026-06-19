@@ -9,6 +9,9 @@ import {
   retirerAttendee,
 } from "@/lib/reservation";
 import { moveBodySchema } from "../_logic";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/move");
 
 /**
  * POST /api/admin/bookings/move — Alice déplace une réservation vers un AUTRE
@@ -79,7 +82,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (loadErr) {
-    console.error("[admin/move] Lecture du booking échouée :", loadErr.message);
+    log.error("Lecture du booking échouée", { db: loadErr.message });
     return NextResponse.json(
       { error: "Impossible de charger la réservation." },
       { status: 500 },
@@ -115,7 +118,7 @@ export async function POST(request: Request) {
     if (message.includes("HTTP 404") || message.includes("HTTP 410")) {
       return NextResponse.json({ error: "Créneau cible introuvable." }, { status: 404 });
     }
-    console.error("[admin/move] Lecture de l'event cible échouée :", err);
+    log.error("Lecture de l'event cible échouée", { err: serializeError(err) });
     return NextResponse.json(
       { error: "Service de réservation indisponible." },
       { status: 502 },
@@ -160,7 +163,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (existErr) {
-    console.error("[admin/move] Pré-vérif anti-double-booking échouée :", existErr.message);
+    log.error("Pré-vérif anti-double-booking échouée", { db: existErr.message });
     return NextResponse.json(
       { error: "Impossible de vérifier le créneau cible." },
       { status: 500 },
@@ -196,7 +199,7 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    console.error("[admin/move] Update booking échoué :", updateErr.message);
+    log.error("Update booking échoué", { db: updateErr.message });
     return NextResponse.json({ error: "Déplacement impossible." }, { status: 500 });
   }
   if (!moved) {
@@ -225,10 +228,9 @@ export async function POST(request: Request) {
     } catch (err) {
       // Le déplacement métier (étape 5) a réussi : on n'échoue pas pour un effet
       // de bord Google. Log pour réconciliation manuelle.
-      console.error(
-        "[admin/move] Retrait attendee de l'ancien event échoué (déplacement maintenu) :",
-        err,
-      );
+      log.error("Retrait attendee de l'ancien event échoué (déplacement maintenu)", {
+        err: serializeError(err),
+      });
     }
   }
 

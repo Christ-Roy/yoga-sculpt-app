@@ -34,18 +34,27 @@ test("arrivée via ?ref=CODE : le code est capté en cookies (ys_ref / ys_ref_pu
   expect(refPub?.httpOnly).toBe(false);
 });
 
-test("landing /invitation?ref=CODE : titre personnalisé avec le prénom du parrain + bloc auth", async ({
+test("landing /invitation?ref=CODE : titre personnalisé + bloc parrain (avatar + email) + bloc auth", async ({
   page,
   testUser,
 }) => {
   // On fait du `testUser` un PARRAIN nommé avec un code de parrainage stable.
   const CODE = "EMMA2345";
   const PRENOM = "Emma";
+  const AVATAR = "https://lh3.googleusercontent.com/a/e2e-avatar-emma";
   const { error } = await admin()
     .from("profiles")
     .update({ referral_code: CODE, full_name: `${PRENOM} Durand` })
     .eq("id", testUser.id);
   expect(error).toBeNull();
+
+  // L'avatar vit dans auth.users.raw_user_meta_data (claim OAuth) → on le pose
+  // temporairement via l'Admin API pour prouver l'affichage du bloc parrain.
+  // (Le compte est jetable et supprimé en fin de test par la fixture testUser.)
+  const { error: metaErr } = await admin().auth.admin.updateUserById(testUser.id, {
+    user_metadata: { avatar_url: AVATAR },
+  });
+  expect(metaErr).toBeNull();
 
   // Le filleul (anonyme, pas de session) arrive sur la landing d'invitation.
   await page.goto(`/invitation?ref=${CODE}`);
@@ -55,6 +64,12 @@ test("landing /invitation?ref=CODE : titre personnalisé avec le prénom du parr
   await expect(
     page.getByRole("heading", { name: new RegExp(`${PRENOM}.*vous a invit`, "i") }),
   ).toBeVisible();
+
+  // Bloc PARRAIN : avatar (image distante) + prénom + e-mail COMPLET en clair.
+  const parrainCard = page.getByTestId("parrain-card");
+  await expect(parrainCard).toBeVisible();
+  await expect(parrainCard.locator("img")).toHaveAttribute("src", AVATAR);
+  await expect(parrainCard.getByText(testUser.email, { exact: false })).toBeVisible();
 
   // L'accroche communautaire est présente.
   await expect(page.getByText(/plus sympa entre ami/i)).toBeVisible();
