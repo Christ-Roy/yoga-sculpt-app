@@ -60,3 +60,43 @@ eux, prêts et corrects : ils fonctionneront dès que le cookie sera scopé en A
 - `src/lib/supabase/proxy.ts` → idem (le refresh middleware doit poser le cookie au même scope).
 - Penser au conditionnement par env (pas de `Domain` en local/dev où le host est `localhost`).
 - Après deploy : sessions host-only existantes invalidées → re-login (ou `clearAuthCookiesAtScopes`).
+
+---
+
+## ✅ LIVRÉ — staging (Option A) — 2026-06-19
+
+Commit `2f7bc49` sur `staging`. Implémentation :
+- `src/lib/supabase/cookie-domain.ts` (NOUVEAU) — source de vérité unique du
+  scope cookie. `computeAuthCookieDomain(env)` PURE + testée. **PROD UNIQUEMENT**
+  (`NODE_ENV === "production"`, même convention que `src/middleware.ts` pour le
+  flag `secure`). Dev/local → AUCUN `domain` (host-only), sinon le cookie casse
+  en `localhost`. Domaine dérivé du host de `NEXT_PUBLIC_APP_URL` (pas codé en
+  dur), fallback `.yoga-sculpt.fr`. Edge-safe (`process.env` + `URL`).
+- `src/lib/supabase/server.ts` + `src/lib/supabase/proxy.ts` — spread
+  `...authCookieDomainOptions()` dans `createServerClient` (les DEUX clients au
+  MÊME scope : sinon le refresh middleware ré-écrirait un cookie host-only qui
+  écraserait le cookie parent-domain).
+- `__tests__/lib/cookie-domain.test.ts` — prod/dev, apex vs sous-domaine,
+  localhost/IP, URL absente/malformée.
+
+### ⚠️ PLAN DE TRANSITION RE-LOGIN (au déploiement prod)
+Au passage en prod, les sessions EXISTANTES portent un cookie **host-only**
+(sans `Domain`). Le nouveau code lit/écrit un cookie **parent-domain**
+(`Domain=.yoga-sculpt.fr`). Conséquences + conduite à tenir :
+1. Le client parent-domain ne « voit » pas le cookie host-only → l'utilisateur
+   est considéré déconnecté → **re-login forcé une fois**. Aucune perte de
+   données (juste une ré-authentification).
+2. Risque de DOUBLON transitoire : un cookie host-only `sb-…-auth-token` ET un
+   cookie parent-domain du même nom peuvent coexister un court instant (le
+   navigateur enverrait les deux, host-only prioritaire selon la spécificité).
+   En pratique le re-login ré-émet le cookie au scope parent et la session
+   repart proprement ; le host-only expire seul.
+3. `@supabase/ssr` fournit `clearAuthCookiesAtScopes` pour nettoyer
+   explicitement les cookies host-only résiduels lors de la transition. **Non
+   câblé ici** (le re-login naturel suffit et le ticket l'acceptait). À ajouter
+   au `/login` ou `/auth/callback` SI on observe des doublons collants en prod
+   après deploy → ticket follow-up si besoin (pas bloquant).
+4. Communication : aucun message user nécessaire (re-login transparent), juste
+   surveiller le taux d'auth post-deploy.
+
+→ Reste : valider CI staging verte, puis promo prod (workflow déploiement habituel).
