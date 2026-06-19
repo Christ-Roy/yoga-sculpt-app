@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeSupabaseMock, asMockResponse, type MockSupabase } from "../helpers/supabase-mock";
 
 /**
- * Tests de GET /api/creneaux — liste des créneaux réservables.
+ * Tests de GET /api/creneaux — liste des créneaux COLLECTIFS réservables.
+ *
+ * ⚠️ Depuis le passage du cours PARTICULIER en créneau LIBRE (2026-06-19), ce
+ * endpoint n'expose QUE les collectifs : les events « particulier » (créés par
+ * les réservations libres) sont FILTRÉS pour ne pas réapparaître comme créneaux
+ * réservables. Le particulier passe par /api/creneaux/particulier.
  *
  * Comportements clés couverts :
  *   - 401 sans auth ;
- *   - liste les créneaux futurs depuis Google Calendar (mocké), déduit le type,
- *     filtre les events annulés/invalides ;
+ *   - liste les créneaux COLLECTIFS futurs depuis Google Calendar (mocké),
+ *     filtre les events annulés/invalides ET les events particulier ;
  *   - comptabilise les inscrits (bookings confirmés) par créneau ;
  *   - 502 si Google Calendar échoue ;
  *   - reste robuste (inscrits=0) si le comptage des bookings échoue.
@@ -82,7 +87,7 @@ describe("GET /api/creneaux", () => {
     expect(res.status).toBe(401);
   });
 
-  it("liste les créneaux futurs, déduit le type et filtre les annulés", async () => {
+  it("liste les créneaux COLLECTIFS futurs, filtre les annulés ET les particuliers", async () => {
     // 1 booking confirmé sur le créneau collectif.
     serviceMock.queueResult("bookings", "select", {
       data: [{ google_calendar_creneau_id: "evt-collectif" }],
@@ -96,20 +101,19 @@ describe("GET /api/creneaux", () => {
     const creneaux = (res.body as { creneaux: Array<{ id: string; type: string; inscrits: number }> })
       .creneaux;
 
-    // L'event annulé est exclu → 2 créneaux exposés.
-    expect(creneaux).toHaveLength(2);
-    expect(creneaux.map((c) => c.id)).toEqual(["evt-collectif", "evt-particulier"]);
+    // L'event annulé ET l'event particulier sont exclus → 1 seul collectif.
+    expect(creneaux).toHaveLength(1);
+    expect(creneaux.map((c) => c.id)).toEqual(["evt-collectif"]);
 
     const collectif = creneaux.find((c) => c.id === "evt-collectif");
     expect(collectif?.type).toBe("collectif");
     expect(collectif?.inscrits).toBe(1);
 
-    const particulier = creneaux.find((c) => c.id === "evt-particulier");
-    expect(particulier?.type).toBe("particulier");
-    expect(particulier?.inscrits).toBe(0);
+    // Le particulier ne doit JAMAIS apparaître dans /api/creneaux.
+    expect(creneaux.find((c) => c.id === "evt-particulier")).toBeUndefined();
   });
 
-  it("expose le lieu (location Google) quand il est renseigné, undefined sinon", async () => {
+  it("expose le lieu (location Google) du collectif quand il est renseigné", async () => {
     const { GET } = await import("@/app/api/creneaux/route");
     const res = asMockResponse(await GET());
 
@@ -122,16 +126,13 @@ describe("GET /api/creneaux", () => {
     expect(creneaux.find((c) => c.id === "evt-collectif")?.lieu).toBe(
       "Studio Bellecour, 69002 Lyon",
     );
-    // Lieu non saisi → absent (l'UI affichera « Lieu à confirmer »).
-    expect(creneaux.find((c) => c.id === "evt-particulier")?.lieu).toBeUndefined();
   });
 
-  it("agrège correctement plusieurs inscrits sur le même créneau", async () => {
+  it("agrège correctement plusieurs inscrits sur le même créneau collectif", async () => {
     serviceMock.queueResult("bookings", "select", {
       data: [
         { google_calendar_creneau_id: "evt-collectif" },
         { google_calendar_creneau_id: "evt-collectif" },
-        { google_calendar_creneau_id: "evt-particulier" },
       ],
       error: null,
     });
@@ -139,7 +140,6 @@ describe("GET /api/creneaux", () => {
     const res = asMockResponse(await GET());
     const creneaux = (res.body as { creneaux: Array<{ id: string; inscrits: number }> }).creneaux;
     expect(creneaux.find((c) => c.id === "evt-collectif")?.inscrits).toBe(2);
-    expect(creneaux.find((c) => c.id === "evt-particulier")?.inscrits).toBe(1);
   });
 
   it("renvoie 502 si Google Calendar échoue", async () => {

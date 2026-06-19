@@ -13,6 +13,7 @@ import type { SeanceAgenda } from "@/lib/calendar-export";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { BuyTickets } from "@/components/BuyTickets";
 import { LieuMaps } from "@/components/LieuMaps";
+import { ReserverParticulierLibre } from "@/components/ReserverParticulierLibre";
 import { Toast, type ToastVariant } from "@/components/Toast";
 
 /**
@@ -214,10 +215,43 @@ export function ReserverClient({
       {/* Solde de tickets */}
       <SoldeBadge solde={solde} />
 
-      {/* Liste des créneaux */}
-      <section aria-label="Créneaux disponibles">
+      {/* Cours particulier — créneau LIBRE (le client choisit son horaire). */}
+      <section aria-label="Cours particulier">
         <h2 className="mb-4 font-display text-xl text-text">
-          Créneaux à venir
+          Cours particulier
+        </h2>
+        <ReserverParticulierLibre
+          soldeParticulier={solde.particulier}
+          onReserved={(booking) => {
+            setSolde((s) => ({
+              ...s,
+              particulier: Math.max(0, s.particulier - 1),
+            }));
+            setReserves((r) => ({ ...r, [booking.google_event_id]: booking.id }));
+            setToast({ message: "Séance réservée !", variant: "success" });
+          }}
+          onNeedsPurchase={(type) => {
+            setAchatType(type);
+            setToast({
+              message:
+                "Vous n'avez pas de ticket pour ce cours. Choisissez une formule ci-dessous.",
+              variant: "error",
+            });
+            requestAnimationFrame(() => {
+              achatRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+            });
+          }}
+          onError={(message) => setToast({ message, variant: "error" })}
+        />
+      </section>
+
+      {/* Cours collectif — liste des créneaux figés posés par Alice. */}
+      <section aria-label="Créneaux collectifs disponibles">
+        <h2 className="mb-4 font-display text-xl text-text">
+          Cours collectifs à venir
         </h2>
 
         {creneaux === null && <CreneauxSkeleton />}

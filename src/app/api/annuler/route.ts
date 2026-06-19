@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getEvent, patchEvent } from "@/lib/google-calendar";
+import { getEvent, patchEvent, deleteEvent } from "@/lib/google-calendar";
 import { logEvent } from "@/lib/events";
+import { notifierAlice } from "@/lib/notify-alice";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
   retirerAttendee,
@@ -191,23 +192,52 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── 6) Retire le user des attendees de l'event Google (best-effort). ────────
-  // Le créneau est un event partagé d'Alice : on ne le SUPPRIME pas (d'autres
-  // users peuvent y être inscrits), on retire juste le user de la liste.
-  if (user.email && booking.google_event_id) {
+  // ── 6) Met à jour l'event Google selon le type (best-effort). ───────────────
+  // PARTICULIER : l'event a été CRÉÉ pour ce client (créneau libre, dédié) → on
+  //   le SUPPRIME de l'agenda d'Alice (libère le créneau, qui pourra être
+  //   re-réservé : l'index unique sur starts_at ne s'applique qu'aux confirmed).
+  // COLLECTIF : l'event est partagé d'Alice (d'autres users peuvent y être
+  //   inscrits) → on ne supprime PAS, on retire juste le user des attendees.
+  // Le placeholder « pending-… » (event Google jamais créé) est ignoré.
+  const aUnEventGoogle =
+    Boolean(booking.google_event_id) &&
+    !booking.google_event_id.startsWith("pending-");
+  if (aUnEventGoogle) {
     try {
-      const event = await getEvent(booking.google_event_id);
-      const attendees = retirerAttendee(event.attendees, user.email);
-      await patchEvent(booking.google_event_id, { attendees });
+      if (booking.type === "particulier") {
+        await deleteEvent(booking.google_event_id);
+      } else if (user.email) {
+        const event = await getEvent(booking.google_event_id);
+        const attendees = retirerAttendee(event.attendees, user.email);
+        await patchEvent(booking.google_event_id, { attendees });
+      }
     } catch (err) {
       // L'annulation métier (étape 4) a réussi : on n'échoue pas la requête
       // pour un effet de bord Google. On log pour réconciliation manuelle.
       console.error(
-        "[annuler] Retrait de l'attendee Google échoué (annulation maintenue) :",
+        "[annuler] MAJ event Google échouée (annulation maintenue) :",
         err,
       );
     }
   }
+
+  // ── 6 bis) Notifie Alice de l'annulation (best-effort). ─────────────────────
+  await notifierAlice("annulation", {
+    type: booking.type,
+    startsAt: booking.starts_at,
+    endsAt: booking.ends_at,
+    clientNom:
+      (user.user_metadata?.full_name as string | undefined) ??
+      (user.user_metadata?.name as string | undefined) ??
+      user.email ??
+      null,
+    clientEmail: user.email ?? null,
+    clientTel:
+      user.phone ||
+      (user.user_metadata?.phone as string | undefined) ||
+      (user.user_metadata?.telephone as string | undefined) ||
+      null,
+  });
 
   // ── Tracking : booking_cancelled. ───────────────────────────────────────────
   // best-effort (l'annulation — métier — est déjà committée, étape 4). On
