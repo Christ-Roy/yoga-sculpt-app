@@ -33,11 +33,12 @@ incarné/rassurant : montrer **la photo de profil ET l'email** du parrain (« {P
 - Rester en best-effort : photo/email absents (parrain magic-link sans avatar, code
   inconnu) → on retombe proprement sur le rendu prénom-seul / titre de repli, jamais
   d'erreur ni de 500 sur cette page publique.
-- ⚠️ DÉCISION à valider AVANT d'afficher l'email : exposer l'email du parrain sur une
-  page PUBLIQUE (accessible à quiconque a le lien `?ref=CODE`) est une fuite de PII
-  potentielle. Le code `?ref=` est partagé volontairement par le parrain, mais l'email
-  reste sensible. Reco : afficher l'AVATAR + le PRÉNOM (incarne sans fuiter), et
-  n'afficher l'email QUE si Robert confirme explicitement que c'est voulu. À trancher.
+- ✅ DÉCISION ROBERT (2026-06-19) : afficher l'**email COMPLET en clair** est validé.
+  Raison : « si il lui donne le lien c'est normal qu'il puisse voir l'adresse mail » — le
+  parrain partage son lien volontairement à des gens qu'il connaît, l'email assumé.
+  → Afficher avatar + prénom + email complet. (Garder le fail-safe : si email/avatar absent,
+  rendu prénom-seul, jamais d'erreur.) Reste à surveiller l'énumération de codes côté sécu
+  (cf [[2026-06-19-passe-securite-features-livrees]] — rate limiting éventuel sur /invitation).
 - Avatar = image distante (`avatar_url` Google) → `aria-hidden` décoratif, `referrerpolicy`
   safe, fallback initiales, pas de layout shift.
 
