@@ -41,6 +41,14 @@ interface ReserverParticulierLibreProps {
   onNeedsPurchase: (type: TicketType) => void;
   /** Callback de message d'erreur (toast). */
   onError: (message: string) => void;
+  /**
+   * Garde TÉLÉPHONE (pilotée par le parent `ReserverClient`). Si le profil n'a
+   * pas de tél, le parent ouvre une modal de saisie : on l'appelle AVANT de
+   * réserver et on joint le numéro renvoyé au POST. `null` = annulé → on avorte.
+   */
+  ensurePhone: () => Promise<string | null>;
+  /** Vrai si un tél est requis (profil sans numéro, pas encore saisi). */
+  needsPhone: boolean;
 }
 
 export function ReserverParticulierLibre({
@@ -48,6 +56,8 @@ export function ReserverParticulierLibre({
   onReserved,
   onNeedsPurchase,
   onError,
+  ensurePhone,
+  needsPhone,
 }: ReserverParticulierLibreProps) {
   const [slots, setSlots] = useState<SlotLibre[] | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -95,12 +105,20 @@ export function ReserverParticulierLibre({
 
   // ── Réservation d'un slot. ──────────────────────────────────────────────────
   async function reserver(startsAt: string) {
+    // Garde tél : réclame le numéro si le profil n'en a pas. Annulation → abort.
+    const tel = await ensurePhone();
+    if (needsPhone && tel === null) return;
+
     setEnCours(startsAt);
     try {
       const res = await fetch("/api/reserver", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "particulier", startsAt }),
+        body: JSON.stringify(
+          tel
+            ? { type: "particulier", startsAt, phone: tel }
+            : { type: "particulier", startsAt },
+        ),
       });
 
       if (res.ok) {

@@ -75,6 +75,10 @@ jobs:
         env:
           NEXT_PUBLIC_SITE_URL: https://yoga-sculpt.fr
           NEXT_PUBLIC_WHATSAPP_GROUP_URL: https://chat.whatsapp.com/In0pbYYeHvw8ygthGWYFA1
+          # client_id PUBLIC du projet yoga-sculpt-auth (Google One Tap /login +
+          # /invitation). Identique sur tous les envs ; fonctionnel en prod (Google
+          # OAuth activé côté Supabase).
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: 201393978914-0r5v4qnjkmh4jj6nrf6ulppscrj5me02.apps.googleusercontent.com
           NEXT_PUBLIC_APP_URL: ${{ secrets.PROD_NEXT_PUBLIC_APP_URL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_ANON_KEY }}

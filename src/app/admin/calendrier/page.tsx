@@ -8,6 +8,9 @@ import {
 } from "@/lib/reservation";
 import { listerPresets, compterReservations, type SlotPreset } from "@/app/api/admin/creneaux/data";
 import { CalendrierClient } from "./CalendrierClient";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("admin/calendrier");
 
 export const metadata: Metadata = {
   title: "Calendrier — Yoga Sculpt",
@@ -91,7 +94,7 @@ async function chargerCreneauxAdmin(): Promise<CreneauAdmin[]> {
     }
     return result;
   } catch (err) {
-    console.error("[admin/calendrier] Lecture agenda indisponible :", err);
+    log.error("lecture agenda indisponible", { err: serializeError(err) });
     return [];
   }
 }
@@ -101,7 +104,7 @@ async function chargerPresets(): Promise<SlotPreset[]> {
   try {
     return await listerPresets();
   } catch (err) {
-    console.error("[admin/calendrier] Lecture presets indisponible :", err);
+    log.error("lecture presets indisponible", { err: serializeError(err) });
     return [];
   }
 }

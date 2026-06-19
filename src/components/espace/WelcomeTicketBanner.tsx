@@ -16,9 +16,9 @@ export function WelcomeTicketBanner() {
   return (
     <div className="mb-8 animate-fade-in-up rounded-[4px] border border-accent/40 bg-accent/5 p-5 sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
           <TicketIcon type="collectif" className="mt-0.5 h-9 w-14 shrink-0" />
-          <div>
+          <div className="min-w-0">
             <p className="font-display text-lg text-text">
               Vos séances offertes vous attendent
             </p>
@@ -30,7 +30,7 @@ export function WelcomeTicketBanner() {
         </div>
         <Link
           href="/espace/parrainer"
-          className="btn-cta-glow w-full shrink-0 sm:w-auto"
+          className="btn-cta-glow max-sm:w-full sm:flex-[0_0_auto]"
           aria-label="Récupérer mes séances offertes en parrainant"
         >
           <Gift className="h-4 w-4" strokeWidth={2} aria-hidden="true" />

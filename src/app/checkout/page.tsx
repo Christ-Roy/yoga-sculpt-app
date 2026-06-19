@@ -2,6 +2,9 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("checkout/page");
 
 /**
  * /checkout?formule=<collectif|particulier|carte10> — point d'entrée checkout
@@ -90,12 +93,13 @@ export default async function CheckoutLinkPage({
       const data = (await res.json()) as { url?: string };
       stripeUrl = data.url;
     } else {
-      console.error(
-        `[checkout/page] /api/checkout a renvoyé ${res.status} pour la formule ${formule}.`,
-      );
+      log.error("/api/checkout a renvoyé un statut non-OK", {
+        status: res.status,
+        formule,
+      });
     }
   } catch (err) {
-    console.error("[checkout/page] Appel /api/checkout échoué :", err);
+    log.error("appel /api/checkout échoué", { err: serializeError(err), formule });
   }
 
   // Stripe OK → on saute directement sur la page de paiement.
