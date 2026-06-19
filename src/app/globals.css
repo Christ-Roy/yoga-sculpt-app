@@ -132,6 +132,49 @@ body {
   animation: fade-in-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ---------- CTA "glow" animé (gradient or vif + stroke lumineux, façon LP) ----
+ * Pour les actions IMPORTANTES (ex : récupérer ses séances offertes). Fond doré
+ * qui défile + faisceau conique qui tourne (border-beam). Texte sombre. */
+.btn-cta-glow {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  isolation: isolate;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.85rem 1.6rem;
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: #140d02;
+  text-decoration: none;
+  background: linear-gradient(100deg,#B08F54 0%,#D4AD6A 22%,#F4D58A 42%,#FFE7A8 50%,#F4D58A 58%,#D4AD6A 78%,#B08F54 100%);
+  background-size: 220% 100%;
+  animation: cta-shift 4.5s ease-in-out infinite;
+  box-shadow: 0 6px 24px rgba(212,173,106,0.28);
+  transition: transform .3s ease, box-shadow .3s ease;
+  overflow: hidden;
+}
+.btn-cta-glow:hover { transform: translateY(-1px); box-shadow: 0 10px 32px rgba(212,173,106,0.42); }
+.btn-cta-glow::before {
+  content: ""; position: absolute; z-index: -1; inset: -150%;
+  background: conic-gradient(from 0deg, transparent 0deg, #FFE7A8 40deg, #D4AD6A 80deg, transparent 120deg, transparent 360deg);
+  animation: cta-beam 3s linear infinite;
+}
+.btn-cta-glow::after {
+  content: ""; position: absolute; z-index: -1; inset: 1.5px; border-radius: 3px;
+  background: linear-gradient(100deg,#B08F54 0%,#D4AD6A 22%,#F4D58A 42%,#FFE7A8 50%,#F4D58A 58%,#D4AD6A 78%,#B08F54 100%);
+  background-size: 220% 100%;
+  animation: cta-shift 4.5s ease-in-out infinite;
+}
+.btn-cta-glow.w-full { width: 100%; }
+@keyframes cta-shift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes cta-beam { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .btn-cta-glow, .btn-cta-glow::before, .btn-cta-glow::after { animation: none; }
+}
+
 /* ---------- Ticket : reflet "shimmer" qui balaye de temps en temps ---------- */
 .ticket-shine {
   /* balayage rapide (1.1s) puis longue pause → "ça brille" périodiquement */

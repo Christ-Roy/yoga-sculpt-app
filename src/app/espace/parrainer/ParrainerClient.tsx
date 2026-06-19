@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ParrainageCard } from "@/components/ParrainageCard";
 import { ShareInvitation } from "@/components/ShareInvitation";
 import { Toast, type ToastVariant } from "@/components/Toast";
 
@@ -141,9 +140,9 @@ export function ParrainerClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <ParrainageCard lienParrainage={data.lienParrainage} code={data.code} />
-
-      {/* Partager l'invitation — partage natif (mobile) ou e-mail (desktop). */}
+      {/* Partager l'invitation — partage natif (mobile) EN PREMIER, puis copie,
+          puis e-mail (ShareInvitation gère déjà cet ordre + le lien visible).
+          ParrainageCard retiré : il dupliquait le lien + copier AVANT le natif. */}
       <section
         className="rounded-[4px] border border-border bg-surface/60 p-6"
         aria-labelledby="partager-title"

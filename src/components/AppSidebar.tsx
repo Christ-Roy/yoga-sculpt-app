@@ -75,17 +75,16 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
           aria-label="Mon espace"
           className="flex items-center px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
-          {/* Logo complet (médaillon + wordmark) quand la sidebar est dépliée. */}
-          <Logo
-            title="Yoga Sculpt — espace"
-            className="group-data-[collapsible=icon]:hidden"
-          />
+          {/* Logo complet (médaillon + wordmark) quand la sidebar est dépliée.
+              Masquage porté par un <span> neutre : le Logo est un inline-flex qui
+              écraserait `hidden` s'il était posé dessus → doublon visible. */}
+          <span className="group-data-[collapsible=icon]:hidden">
+            <Logo title="Yoga Sculpt — espace" />
+          </span>
           {/* Médaillon seul quand la sidebar est repliée (espace étroit). */}
-          <Logo
-            title="Yoga Sculpt — espace réduit"
-            showText={false}
-            className="hidden group-data-[collapsible=icon]:inline-flex"
-          />
+          <span className="hidden group-data-[collapsible=icon]:inline-flex">
+            <Logo title="Yoga Sculpt — espace réduit" showText={false} />
+          </span>
         </Link>
       </SidebarHeader>
 

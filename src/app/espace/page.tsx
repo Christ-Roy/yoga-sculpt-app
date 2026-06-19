@@ -78,11 +78,15 @@ export default async function EspacePage() {
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
   const solde = calculerSolde((tickets ?? []) as LigneSolde[]);
 
-  // Ticket de bienvenue encore consommable → on pousse fortement la 1re résa
-  // (moment d'activation clé). Vrai uniquement s'il reste une séance welcome.
-  const aTicketBienvenue = (tickets ?? []).some(
-    (t) => (t as { source?: string | null }).source === "welcome",
-  );
+  // Bannière parrainage : affichée tant qu'il reste des séances offertes à
+  // gagner (le parrain est crédité 1 ticket/filleul, plafond 3). On pousse le
+  // parrainage tant que < 3 filleuls ont été crédités.
+  const { count: filleulsCredites } = await supabase
+    .from("referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("parrain_user_id", user.id)
+    .eq("ticket_credite", true);
+  const resteSeancesAGagner = (filleulsCredites ?? 0) < 3;
 
   // ── Séances confirmées à venir (RLS user-scopée). ──────────────────────────
   const { data: bookingRows } = await supabase
@@ -114,7 +118,7 @@ export default async function EspacePage() {
         </h1>
       </div>
 
-      {aTicketBienvenue && <WelcomeTicketBanner />}
+      {resteSeancesAGagner && <WelcomeTicketBanner />}
 
       <DashboardGrid>
         {/* Séances à venir — widget « héros », plus large sur grand écran. */}
