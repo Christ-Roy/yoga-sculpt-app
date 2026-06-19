@@ -249,6 +249,73 @@ describe("POST /api/reserver", () => {
     expect((res.body as { ok?: boolean }).ok).toBe(true);
   });
 
+  it("range le téléphone saisi (phone) sur profiles.phone si le profil n'en a pas", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-tel", status: "confirmed", ticket_id: TICKET.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: { id: TICKET.id }, error: null });
+    // Lecture profiles.phone → pas de tel existant (on pourra ranger).
+    serviceMock.queueResult("profiles", "select", { data: { phone: null }, error: null });
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ creneauId: CRENEAU_ID, phone: "06 12 34 56 78" })),
+    );
+
+    expect(res.status).toBe(200);
+    // Le tel normalisé (E.164) est écrit sur profiles.phone.
+    const updateProfile = serviceMock.calls.find(
+      (c) => c.table === "profiles" && c.op === "update",
+    );
+    expect(updateProfile?.payload).toEqual({ phone: "+33612345678" });
+  });
+
+  it("n'écrase PAS profiles.phone s'il est déjà renseigné", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-tel2", status: "confirmed", ticket_id: TICKET.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: { id: TICKET.id }, error: null });
+    // Profil a DÉJÀ un tél → on ne doit pas l'écraser.
+    serviceMock.queueResult("profiles", "select", {
+      data: { phone: "+33700000000" },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ creneauId: CRENEAU_ID, phone: "06 12 34 56 78" })),
+    );
+
+    expect(res.status).toBe(200);
+    const updateProfile = serviceMock.calls.find(
+      (c) => c.table === "profiles" && c.op === "update",
+    );
+    expect(updateProfile).toBeUndefined();
+  });
+
+  it("phone invalide → réservation OK (200) et rien rangé en base (best-effort)", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-tel3", status: "confirmed", ticket_id: TICKET.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: { id: TICKET.id }, error: null });
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ creneauId: CRENEAU_ID, phone: "pas-un-numero" })),
+    );
+
+    // Le tel invalide n'empêche pas la résa ; aucune écriture profil ni lecture.
+    expect(res.status).toBe(200);
+    const profileCall = serviceMock.calls.find((c) => c.table === "profiles");
+    expect(profileCall).toBeUndefined();
+  });
+
   it("renvoie 409 + rollback du booking si la course sur le décrément est perdue", async () => {
     serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
     serviceMock.queueResult("bookings", "insert", {

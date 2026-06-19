@@ -10,6 +10,7 @@ import {
 } from "@/lib/google-calendar";
 import { logEvent } from "@/lib/events";
 import { notifierAlice, resoudreTelClient } from "@/lib/notify-alice";
+import { normalizePhone } from "@/lib/phone";
 import {
   getUserGclid,
   recordAdsConversion,
@@ -81,13 +82,28 @@ const PG_UNIQUE_VIOLATION = "23505";
  *   - `{ creneauId }`                      → mode A (collectif/existant) ;
  *   - `{ type:"particulier", startsAt }`   → mode B (créneau libre).
  * Rejet strict de tout champ inconnu.
+ *
+ * `phone` est OPTIONNEL dans les deux modes : le client ne l'envoie QUE si son
+ * profil n'a pas encore de téléphone (cf. `ReserverClient`). On l'accepte en
+ * chaîne brute (validation/normalisation côté serveur via `normalizePhone`), avec
+ * une borne de longueur défensive contre un payload abusif. Best-effort : un tél
+ * absent/invalide ne casse JAMAIS la réservation (Alice s'en passera), il est
+ * simplement rangé sur `profiles.phone` quand il est exploitable ET que le profil
+ * n'en a pas déjà un (on n'écrase jamais).
  */
+const phoneSchema = z.string().trim().max(32).optional();
 const bodySchema = z.union([
-  z.object({ creneauId: z.string().min(1, "creneauId requis.") }).strict(),
+  z
+    .object({
+      creneauId: z.string().min(1, "creneauId requis."),
+      phone: phoneSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.literal("particulier"),
       startsAt: z.string().min(1, "startsAt requis."),
+      phone: phoneSchema,
     })
     .strict(),
 ]);
@@ -152,7 +168,7 @@ export async function POST(request: Request) {
 
   // ── Aiguillage : mode B (particulier libre) si `startsAt` fourni. ───────────
   if ("startsAt" in body) {
-    return reserverParticulierLibre(body.startsAt, user, service);
+    return reserverParticulierLibre(body.startsAt, body.phone, user, service);
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -282,9 +298,15 @@ export async function POST(request: Request) {
     });
   }
 
+  // ── Range le tél saisi à la résa si le profil n'en a pas (best-effort). ─────
+  // Fait AVANT de résoudre le tel pour la notif → le numéro fraîchement saisi
+  // est repris dans le rappel d'Alice. On ne touche pas au tél déjà connu.
+  await rangerTelephoneSiAbsent(service, user.id, body.phone);
+
   // ── Notif Alice (best-effort) + tracking. ───────────────────────────────────
   // Le tel vient de l'auth si présent, sinon de profiles.phone (collecté au
-  // paiement Stripe). Indispensable pour qu'Alice puisse rappeler la cliente.
+  // paiement Stripe ou ci-dessus à la réservation). Indispensable pour qu'Alice
+  // puisse rappeler la cliente.
   await notifierAlice("reservation", {
     type,
     startsAt,
@@ -317,6 +339,7 @@ export async function POST(request: Request) {
  */
 async function reserverParticulierLibre(
   startsAtBrut: string,
+  phoneSaisi: string | null | undefined,
   user: {
     id: string;
     email?: string;
@@ -480,8 +503,14 @@ async function reserverParticulierLibre(
     booking.google_event_id = googleEventId;
   }
 
+  // ── Range le tél saisi à la résa si le profil n'en a pas (best-effort). ─────
+  // Fait AVANT de résoudre le tel pour la notif → le numéro fraîchement saisi
+  // est repris dans le rappel d'Alice. On ne touche pas au tél déjà connu.
+  await rangerTelephoneSiAbsent(service, user.id, phoneSaisi);
+
   // ── Notif Alice (best-effort) + tracking. ───────────────────────────────────
-  // Tel : auth si présent, sinon profiles.phone (collecté au paiement Stripe).
+  // Tel : auth si présent, sinon profiles.phone (collecté au paiement Stripe ou
+  // ci-dessus à la réservation).
   await notifierAlice("reservation", {
     type,
     startsAt,
@@ -537,6 +566,46 @@ async function attribuerTicketGratuitConsomme(
     gclid,
     valueEur: FREE_TICKET_VALUE_EUR,
   });
+}
+
+/**
+ * Range le téléphone saisi à la réservation sur `profiles.phone`, SI le profil
+ * n'en a pas déjà un. Même contrat que le rangement au paiement Stripe
+ * (webhook) : Alice a besoin du tel de ses clientes, l'OAuth Google ne le
+ * fournit pas → on le récupère au moment où la cliente réserve si elle ne l'a
+ * pas encore donné.
+ *
+ * Règles :
+ *   - on NE écrase JAMAIS un téléphone déjà renseigné (la 1ère source fait foi) ;
+ *   - on valide/normalise (E.164) avant d'écrire — pas de garbage en base ;
+ *   - BEST-EFFORT absolu : tout échec est avalé. La réservation (métier) a déjà
+ *     réussi quand on arrive ici, rien ne doit la faire échouer pour un tél.
+ */
+async function rangerTelephoneSiAbsent(
+  service: SupabaseClient,
+  userId: string,
+  rawPhone: string | null | undefined,
+): Promise<void> {
+  const phone = normalizePhone(rawPhone);
+  if (!phone) return; // pas de tel exploitable → rien à ranger.
+
+  try {
+    const { data: existing } = await service
+      .from("profiles")
+      .select("phone")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existing?.phone) return; // déjà renseigné → on respecte l'existant.
+
+    await service.from("profiles").update({ phone }).eq("id", userId);
+    log.info("Téléphone (réservation) rangé sur le profil", { user_id: userId });
+  } catch (err) {
+    log.error("Rangement du téléphone (réservation) échoué (non bloquant)", {
+      user_id: userId,
+      err: serializeError(err),
+    });
+  }
 }
 
 async function selectionnerTicket(
