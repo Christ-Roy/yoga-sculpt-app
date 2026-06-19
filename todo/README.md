@@ -2,7 +2,7 @@
 
 > Index du backlog. Le moteur de réservation (A→G) est **livré en prod** (cf `done/`).
 > Tickets sur la branche `staging`. Quand un ticket est livré (preuve : SHA + code) → `git mv` vers `done/`.
-> Dernière MAJ : 2026-06-19.
+> Dernière MAJ : 2026-06-19 (rangement post-mise-en-prod).
 
 ## 🔴 À finir vite (reliquats de la mise en prod)
 
@@ -18,10 +18,14 @@
 - **`2026-06-18-features-produit-reservation.md`** — Backlog index. Livré : annulation 24h,
   rappels J-1/H-2 (à vérifier en réel), sidebar shadcn, parrainage. Reste : carte cadeau
   (repoussé), ticket-contre-avis 5b (gated approbation API GMB).
-- **`2026-06-18-dashboard-widgets-et-dev-env.md`** — Dashboard à widgets (partiellement en
-  place via les widgets espace) + env `npm run dev` hot-reload exposé Tailscale sur dev-pub.
-- **`2026-06-19-onboarding-page-accueil-invitation-parrainage.md`** — Page d'accueil
-  chaleureuse en début d'onboarding quand on arrive via un lien d'invitation (créé ce jour).
+- **`2026-06-18-dashboard-widgets-et-dev-env.md`** — Dashboard à widgets (§1 LIVRÉ :
+  `/espace` = vrai dashboard widgets, `src/components/espace/DashboardGrid` + Séances/
+  Tickets/Réserver/Parrainage/WelcomeBanner). Reste : widget « Offrir une séance » (gated
+  feature cadeau repoussée) + §2 env `npm run dev` hot-reload exposé Tailscale sur dev-pub.
+- **`2026-06-19-onboarding-page-accueil-invitation-parrainage.md`** — Landing invitation
+  LIVRÉE (page.tsx + AuthMethods + `prenomParrainParCode` + migration 0016). **Reliquat
+  reformulé** : afficher la PHOTO de profil + (option) l'email du parrain via OAuth
+  (`auth.users.raw_user_meta_data`). Décision PII à trancher pour l'email.
 - **`2026-06-19-toasts-loaders-feedback-ux.md`** — Système de toasts + état loading unifié
   sur toutes les actions. **Dépend de** la décision « deux systèmes de boutons » (ci-dessous).
 - **`2026-06-19-login-fond-flou.md`** — Image de fond floutée derrière le login (cosmétique premium).
@@ -50,6 +54,9 @@
 
 ## ✅ Livré récemment → `done/`
 
+- `2026-06-19-obs-logs-structures-legers.md` (commit f71f2e9 — `src/lib/log.ts`
+  `createLogger` JSON edge-safe + 9 chemins critiques migrés ; plus aucun `console.*`
+  brut dans webhooks/stripe, checkout, auth/callback…).
 - `2026-06-19-qa-ui-lieu-incoherent-dashboard.md` (commit 662dd1e — vrai lieu Google sur
   dashboard + mes réservations, `src/lib/booking-lieu.ts`, plus de `LIEU_COURS` en dur).
 - `2026-06-19-qa-secu-open-redirect-auth-callback.md` (commit d873b13 — `safeInternalRedirect`
