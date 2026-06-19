@@ -7,17 +7,16 @@ import { WidgetCard } from "@/components/espace/WidgetCard";
  * Widget « Réserver » — accès rapide au calendrier de réservation maison.
  *
  * Composant statique (pas de `"use client"`) : un simple raccourci vers
- * `/espace/reserver`. Rappelle le contexte (cours en plein air au Parc de la
- * Tête d'Or, collectif le vendredi soir) pour donner envie.
+ * `/espace/reserver`. Accroche VOLONTAIREMENT générique : le lieu précis d'une
+ * séance n'est pas figé ici (il peut varier été/hiver) — il est affiché par
+ * créneau depuis le vrai champ « Lieu » Google (cf. `LieuMaps`), pas en dur.
  */
 export function ReserverWidget() {
   return (
     <WidgetCard title="Réserver" titleId="widget-reserver-title" icon={CalendarPlus}>
       <p className="text-sm leading-relaxed text-text-secondary">
-        Choisissez un créneau parmi les dates proposées par Alice. Cours en plein
-        air au{" "}
-        <span className="text-text">Parc de la Tête d&apos;Or</span> — collectif le
-        vendredi soir.
+        Choisissez un créneau parmi les dates proposées par Alice. Le lieu exact
+        est précisé sur chaque séance.
       </p>
       <div className="mt-5">
         <Link

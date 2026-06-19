@@ -15,6 +15,7 @@ import { TicketsWidget } from "@/components/espace/TicketsWidget";
 import { ReserverWidget } from "@/components/espace/ReserverWidget";
 import { ParrainageWidget } from "@/components/espace/ParrainageWidget";
 import { WelcomeTicketBanner } from "@/components/espace/WelcomeTicketBanner";
+import { resoudreLieuxParEvent } from "@/lib/booking-lieu";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
@@ -31,11 +32,11 @@ export const metadata: Metadata = {
  * (`/api/parrainage`) : le fetch SSR worker→worker est peu fiable sur l'edge
  * Cloudflare (cf. note `ParrainerPage`). Il dégrade proprement.
  *
- * Lieu des cours = « Parc de la Tête d'Or » (cours en plein air) : on l'applique
- * par défaut sur les séances, le booking ne stockant pas le lieu en base.
+ * Lieu des cours = LE VRAI lieu de l'event Google (champ « Lieu » saisi par
+ * Alice, qui peut varier été/hiver). On le RELIT depuis Google par
+ * `google_event_id` (cf. `resoudreLieuxParEvent`) — plus de constante en dur. Si
+ * Google est indisponible ou le lieu non saisi, l'UI affiche « Lieu à confirmer ».
  */
-
-const LIEU_COURS = "Parc de la Tête d'Or";
 
 export default async function EspacePage() {
   const supabase = await createClient();
@@ -91,22 +92,26 @@ export default async function EspacePage() {
   // ── Séances confirmées à venir (RLS user-scopée). ──────────────────────────
   const { data: bookingRows } = await supabase
     .from("bookings")
-    .select("id, type, starts_at, ends_at")
+    .select("id, type, starts_at, ends_at, google_event_id")
     .eq("status", "confirmed")
     .gte("starts_at", nowIso)
     .order("starts_at", { ascending: true });
 
-  const seances: SeanceWidget[] = (
-    (bookingRows ?? []) as Pick<
-      Booking,
-      "id" | "type" | "starts_at" | "ends_at"
-    >[]
-  ).map((b) => ({
+  const bookings = (bookingRows ?? []) as Pick<
+    Booking,
+    "id" | "type" | "starts_at" | "ends_at" | "google_event_id"
+  >[];
+
+  // Lieu RÉEL des séances : relu depuis Google par `google_event_id` (UN seul
+  // listEvents). Google KO / lieu non saisi → `undefined` → « Lieu à confirmer ».
+  const lieuxParEvent = await resoudreLieuxParEvent(bookings);
+
+  const seances: SeanceWidget[] = bookings.map((b) => ({
     id: b.id,
     type: b.type,
     starts_at: b.starts_at,
     ends_at: b.ends_at,
-    lieu: LIEU_COURS,
+    lieu: lieuxParEvent.get(b.google_event_id),
   }));
 
   return (

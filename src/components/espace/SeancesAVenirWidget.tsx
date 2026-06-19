@@ -34,8 +34,12 @@ export interface SeanceWidget {
   type: Booking["type"];
   starts_at: string;
   ends_at: string;
-  /** Lieu (par défaut « Parc de la Tête d'Or » — cours en plein air). */
-  lieu: string;
+  /**
+   * Lieu RÉEL de la séance (champ « Lieu » de l'event Google), relu par la page.
+   * Absent (`undefined`) si Google est indisponible ou le lieu non saisi → on
+   * affiche « Lieu à confirmer » plutôt qu'un lieu potentiellement faux.
+   */
+  lieu?: string;
 }
 
 function versSeanceAgenda(s: SeanceWidget): SeanceAgenda {
@@ -44,7 +48,7 @@ function versSeanceAgenda(s: SeanceWidget): SeanceAgenda {
     titre: `${libelleType(s.type)} — Yoga Sculpt`,
     starts_at: s.starts_at,
     ends_at: s.ends_at,
-    lieu: s.lieu,
+    lieu: s.lieu?.trim() || undefined,
     description: "Séance Yoga Sculpt avec Alice Gaudry.",
   };
 }
