@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { isDisposableEmail, getClientIp, canCreditReferral } from "@/lib/anti-abuse";
+import {
+  isDisposableEmail,
+  getClientIp,
+  getClientIpFromHeaders,
+  canCreditReferral,
+  canGrantWelcomeTicket,
+} from "@/lib/anti-abuse";
 import { makeSupabaseMock, type MockSupabase } from "../helpers/supabase-mock";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -70,6 +76,28 @@ describe("getClientIp", () => {
 
   it("renvoie null si aucune IP exploitable", () => {
     expect(getClientIp(makeReq({}))).toBeNull();
+  });
+});
+
+describe("getClientIpFromHeaders", () => {
+  it("lit directement un porteur de headers (Server Action)", () => {
+    const headers = {
+      get: (k: string) =>
+        ({ "CF-Connecting-IP": "203.0.113.9" } as Record<string, string>)[k] ??
+        null,
+    };
+    expect(getClientIpFromHeaders(headers)).toBe("203.0.113.9");
+  });
+
+  it("retombe sur x-forwarded-for et renvoie null sans header", () => {
+    const xff = {
+      get: (k: string) =>
+        ({ "x-forwarded-for": "198.51.100.4, 10.0.0.2" } as Record<string, string>)[
+          k
+        ] ?? null,
+    };
+    expect(getClientIpFromHeaders(xff)).toBe("198.51.100.4");
+    expect(getClientIpFromHeaders({ get: () => null })).toBeNull();
   });
 });
 
@@ -184,5 +212,89 @@ describe("canCreditReferral", () => {
     expect(
       svc.calls.find((c) => c.table === "account_signals"),
     ).toBeUndefined();
+  });
+});
+
+describe("canGrantWelcomeTicket", () => {
+  let svc: MockSupabase;
+
+  beforeEach(() => {
+    svc = makeSupabaseMock();
+  });
+
+  it("W1 : e-mail jetable → refus immédiat (aucune lecture DB)", async () => {
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "abuser@yopmail.com",
+      ip: "203.0.113.7",
+      fingerprint: "fp",
+    });
+    expect(ok).toBe(false);
+    expect(svc.calls.length).toBe(0);
+  });
+
+  it("W2 : IP partagée avec un autre compte → refus", async () => {
+    svc.queueResult("account_signals", "select", {
+      data: [{ user_id: "autre" }],
+      error: null,
+    });
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "client@gmail.com",
+      ip: "203.0.113.7",
+      fingerprint: null,
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("W3 : fingerprint partagé avec un autre compte → refus", async () => {
+    svc.queueResult("account_signals", "select", {
+      data: [{ user_id: "autre" }],
+      error: null,
+    });
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "client@gmail.com",
+      ip: null,
+      fingerprint: "fp-partage",
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("signaux uniques → octroi autorisé (true)", async () => {
+    svc.queueResult("account_signals", "select", { data: [], error: null }); // IP unique
+    svc.queueResult("account_signals", "select", { data: [], error: null }); // fp unique
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "client@gmail.com",
+      ip: "203.0.113.7",
+      fingerprint: "fp-unique",
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("ne lance aucune requête quand IP/fingerprint null → autorisé", async () => {
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "client@gmail.com",
+      ip: null,
+      fingerprint: null,
+    });
+    expect(ok).toBe(true);
+    expect(svc.calls.find((c) => c.table === "account_signals")).toBeUndefined();
+  });
+
+  it("fail-safe : erreur DB sur lecture IP → refus (côté sûr)", async () => {
+    svc.queueResult("account_signals", "select", {
+      data: null,
+      error: { message: "timeout" },
+    });
+    const ok = await canGrantWelcomeTicket(asClient(svc), {
+      userId: "u1",
+      email: "client@gmail.com",
+      ip: "203.0.113.7",
+      fingerprint: null,
+    });
+    expect(ok).toBe(false);
   });
 });

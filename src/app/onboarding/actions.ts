@@ -1,9 +1,13 @@
 "use server";
 
 import { z } from "zod";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
 import { logEvent } from "@/lib/events";
+import { getClientIpFromHeaders } from "@/lib/anti-abuse";
+import { grantWelcomeTicket } from "@/lib/welcome-ticket";
 
 const answersSchema = z.object({
   goal: z.string().min(1).max(64),
@@ -85,6 +89,28 @@ export async function saveOnboarding(
     { goal, level, frequency, availability },
     { source: "onboarding" },
   );
+
+  // ── Ticket de bienvenue (« 1ère séance offerte » — pivot Essai gratuit). ────
+  // À la 1ère complétion d'onboarding, on crédite 1 ticket collectif offert.
+  // Idempotent (flag profil + index unique DB), anti-abus (e-mail jetable /
+  // IP / fingerprint partagés) et SILENCIEUX en cas de refus. BEST-EFFORT :
+  // toute erreur est avalée — ne JAMAIS faire échouer l'onboarding pour ça
+  // (le métier — réponses + onboarding_completed — est déjà persisté).
+  try {
+    const service = createServiceClient();
+    const ip = getClientIpFromHeaders(await headers());
+    await grantWelcomeTicket(service, {
+      userId: user.id,
+      email: user.email ?? "",
+      ip,
+      // Fingerprint indisponible dans une Server Action (collecté côté client,
+      // poussé via /api/parrainage/completer au login). L'IP + l'e-mail jetable
+      // restent les signaux portants ici.
+      fingerprint: null,
+    });
+  } catch (welcomeErr) {
+    console.error("[onboarding] Ticket de bienvenue best-effort échoué :", welcomeErr);
+  }
 
   return { ok: true };
 }

@@ -162,6 +162,7 @@ async function crediterTicketParrain(
     type: "collectif",
     quantite_initiale: 1,
     quantite_restante: 1,
+    source: "referral", // traçabilité d'origine (cf migration 0009).
     // Pas de stripe_* : c'est un ticket offert (parrainage), pas un achat.
     // expires_at null = pas d'expiration imposée au cadeau.
   });

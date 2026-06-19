@@ -8,6 +8,9 @@
 /** Nature d'un cours : collectif (carnet partagé, créneaux d'Alice) ou particulier. */
 export type TicketType = "collectif" | "particulier";
 
+/** Origine d'un ticket (cf colonne `tickets.source`, migration 0009). */
+export type TicketSource = "welcome" | "referral" | "paid" | "admin";
+
 /** Statut d'une réservation. */
 export type BookingStatus = "confirmed" | "cancelled";
 
@@ -29,6 +32,12 @@ export type Ticket = {
   stripe_session_id: string | null;
   /** ISO 8601. `null` = pas d'expiration. */
   expires_at: string | null;
+  /**
+   * Origine du ticket : `welcome` (1ère séance offerte), `referral` (parrainage),
+   * `paid` (Stripe), `admin` (ajustement). `null` pour les tickets historiques
+   * (colonne additive, cf migration 0009).
+   */
+  source: TicketSource | null;
   /** ISO 8601. */
   created_at: string;
 };
