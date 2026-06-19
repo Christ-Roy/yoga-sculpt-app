@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { DEV_AUTH_BYPASS } from "@/lib/dev-auth";
+import { authCookieDomainOptions } from "@/lib/supabase/cookie-domain";
 
 /**
  * Refreshes the Supabase session on every matched request and enforces
@@ -28,6 +29,13 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // ⚠️ PROD : MÊME scope que le client serveur (`Domain=.yoga-sculpt.fr`).
+      // Le middleware de refresh DOIT poser le cookie au même scope, sinon
+      // incohérence (le refresh re-poserait un cookie host-only qui écrase le
+      // cookie parent-domain). `cookieOptions.domain` est appliqué par la lib à
+      // chaque cookie → l'`options` reçu dans `setAll` ci-dessous le porte déjà.
+      // En dev/local : objet vide → host-only. Cf src/lib/supabase/cookie-domain.
+      ...authCookieDomainOptions(),
       cookies: {
         getAll() {
           return request.cookies.getAll();
