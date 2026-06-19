@@ -29,8 +29,8 @@ const SENDER = {
 
 /** Paramètres d'un envoi transactionnel. */
 export interface SendTransactionalEmailParams {
-  /** Destinataire (adresse email). */
-  to: string;
+  /** Destinataire(s) : une adresse, ou plusieurs (array, ou CSV `a@x,b@y`). */
+  to: string | string[];
   /** Nom affiché du destinataire (optionnel, pour l'en-tête To). */
   toName?: string;
   /** Objet du mail. */
@@ -60,6 +60,18 @@ export async function sendTransactionalEmail(
 
   const { to, toName, subject, htmlContent, textContent } = params;
 
+  // Accepte une adresse, un array, ou un CSV (`a@x.fr, b@y.fr`). On dédoublonne
+  // et on retire les entrées vides. Le `toName` ne s'applique qu'à un destinataire
+  // unique (sinon le même nom collerait mal à plusieurs adresses distinctes).
+  const recipients = (Array.isArray(to) ? to : to.split(","))
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const uniques = [...new Set(recipients)];
+  const toField =
+    uniques.length === 1 && toName
+      ? [{ email: uniques[0], name: toName }]
+      : uniques.map((email) => ({ email }));
+
   const response = await fetch(BREVO_API_URL, {
     method: "POST",
     headers: {
@@ -69,7 +81,7 @@ export async function sendTransactionalEmail(
     },
     body: JSON.stringify({
       sender: SENDER,
-      to: [toName ? { email: to, name: toName } : { email: to }],
+      to: toField,
       subject,
       htmlContent,
       textContent,
