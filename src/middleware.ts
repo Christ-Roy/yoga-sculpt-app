@@ -1,5 +1,50 @@
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
+import { sanitizeRefCode } from "@/lib/ref-code";
+
+/**
+ * Durée de vie des cookies de parrainage (30 min) — couvre une inscription
+ * complète, y compris un aller-retour OAuth, sans traîner sur l'appareil.
+ */
+const REF_COOKIE_MAX_AGE = 60 * 30;
+
+/**
+ * Parrainage (V2b) — capte le code `?ref=<CODE>` du lien d'invitation et le
+ * dépose en cookie. DOIT se faire ici (middleware) et PAS dans le render de
+ * `login/page.tsx` : écrire un cookie pendant le rendu d'une page (GET) est
+ * interdit par Next 16 (« Cookies can only be modified in a Server Action or
+ * Route Handler ») et lève un 500 sur le runtime Workers — ce qui cassait tout
+ * lien de parrainage. Le middleware, lui, écrit légitimement sur la réponse.
+ *
+ * DEUX cookies, par design (cf. lib/ref-code.ts + auth/callback) :
+ *   - `ys_ref`     httpOnly   → lu par le SERVEUR (auth/callback).
+ *   - `ys_ref_pub` JS-lisible → lu par le CLIENT (FingerprintCollector) pour
+ *                  POST /api/parrainage/completer avec le fingerprint device.
+ */
+function deposerCookieParrainage(request: NextRequest, response: Response) {
+  const ref = request.nextUrl.searchParams.get("ref");
+  const code = sanitizeRefCode(ref);
+  if (!code) return;
+  const isProd = process.env.NODE_ENV === "production";
+  const base = {
+    secure: isProd,
+    sameSite: "lax" as const, // survit au redirect OAuth retour.
+    path: "/",
+    maxAge: REF_COOKIE_MAX_AGE,
+  };
+  // `response` est une NextResponse (retournée par updateSession) → .cookies.
+  const res = response as unknown as {
+    cookies: {
+      set: (
+        name: string,
+        value: string,
+        opts: Record<string, unknown>,
+      ) => void;
+    };
+  };
+  res.cookies.set("ys_ref", code, { ...base, httpOnly: true });
+  res.cookies.set("ys_ref_pub", code, { ...base, httpOnly: false });
+}
 
 /**
  * Session-refresh + route-protection middleware.
@@ -21,7 +66,11 @@ import { updateSession } from "@/lib/supabase/proxy";
 export const runtime = "experimental-edge";
 
 export async function middleware(request: NextRequest) {
-  return updateSession(request);
+  const response = await updateSession(request);
+  // Capte un éventuel `?ref=` (lien de parrainage) et pose les cookies sur la
+  // réponse — jamais dans le render de la page (cf. deposerCookieParrainage).
+  deposerCookieParrainage(request, response);
+  return response;
 }
 
 export const config = {
