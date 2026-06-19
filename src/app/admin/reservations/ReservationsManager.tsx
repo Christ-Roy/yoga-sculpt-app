@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { formatDateHeure, formatDate, formatPlage } from "@/lib/admin-format";
 import { TypeBadge } from "@/components/admin/TypeBadge";
 import { StatusBadge } from "@/components/admin/StatusBadge";
+import { SourceBadge } from "@/components/admin/SourceBadge";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { CreneauCible, ReservationAdmin } from "./_data";
@@ -535,6 +536,7 @@ function VueListe({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-text">{r.nom}</span>
                   <TypeBadge type={r.type} />
+                  <SourceBadge source={r.ticketSource} />
                   <StatusBadge status={r.status} />
                   {r.attendance !== "pending" && (
                     <AttendanceBadge attendance={r.attendance} />
@@ -679,7 +681,10 @@ function VueParCreneau({
                 key={i.id}
                 className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"
               >
-                <span className="text-text">{i.nom}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-text">{i.nom}</span>
+                  <SourceBadge source={i.ticketSource} />
+                </span>
                 <span className="flex flex-col gap-0.5 text-xs text-text-secondary sm:flex-row sm:items-baseline sm:gap-3">
                   {i.email && (
                     <a href={`mailto:${i.email}`} className="hover:text-accent">

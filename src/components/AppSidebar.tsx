@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarPlus, Gift, Home, LogOut, Ticket } from "lucide-react";
+import {
+  CalendarPlus,
+  Gift,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Ticket,
+} from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
 import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
@@ -39,8 +46,20 @@ const LIENS = [
  *
  * Le lien actif est déterminé via `usePathname` (match exact pour `/espace`
  * afin de ne pas allumer l'accueil sur les sous-pages, préfixe sinon).
+ *
+ * `isAdmin` (résolu côté serveur dans le layout via `estAdmin(user.email)`) ne
+ * sert qu'à AFFICHER l'entrée « Administration » → `/admin` : aucun lien vers le
+ * back-office ne doit fuiter chez un client lambda. La SÉCURITÉ reste serveur
+ * (`requireAdmin()` garde déjà chaque page `/admin`) — ce flag est purement
+ * cosmétique, jamais une frontière d'autorisation.
  */
-export function AppSidebar({ userLabel }: { userLabel: string }) {
+export function AppSidebar({
+  userLabel,
+  isAdmin = false,
+}: {
+  userLabel: string;
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
 
@@ -130,6 +149,31 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Accès back-office — visible UNIQUEMENT pour les admins (Alice / Robert).
+            Le LIEN est masqué pour un client lambda (pas de bouton qui le
+            redirigerait) ; la garde serveur `requireAdmin()` reste l'autorité. */}
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith("/admin")}
+                    tooltip="Administration"
+                  >
+                    <Link href="/admin">
+                      <LayoutDashboard />
+                      <span>Administration</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>

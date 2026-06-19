@@ -21,7 +21,7 @@ import type {
   GoogleCalendarAttendee,
   GoogleCalendarEvent,
 } from "@/lib/google-calendar";
-import type { TicketType } from "@/lib/db-types";
+import type { TicketSource, TicketType } from "@/lib/db-types";
 
 // ============================================================================
 // Convention de typage des créneaux (collectif vs particulier)
@@ -282,6 +282,58 @@ export function formaterPlageFr(
 /** Libellé FR du type de cours (affichage badge / titre). */
 export function libelleType(type: TicketType): string {
   return type === "particulier" ? "Cours particulier" : "Cours collectif";
+}
+
+// ============================================================================
+// Origine du ticket consommé par une réservation (payé vs offert)
+// ============================================================================
+
+/**
+ * Catégorie d'affichage de la source d'un ticket, pour le back-office.
+ *
+ *   - `paye`    : ticket acheté (Stripe, `source = 'paid'`).
+ *   - `offert`  : ticket gratuit — séance d'essai (`welcome`), parrainage
+ *                 (`referral`) ou geste commercial d'Alice (`admin`).
+ *   - `inconnu` : booking sans ticket rattaché (`ticket_id` null) ou ticket à
+ *                 `source` null (carnets historiques d'avant la colonne 0010).
+ *
+ * On regroupe welcome/referral/admin sous « offert » parce que, vu d'Alice, le
+ * seul axe qui compte est « est-ce que cette place a été payée ? ». Le détail
+ * fin (welcome vs referral vs admin) reste disponible via `detailSourceTicket`.
+ */
+export type CategorieSourceTicket = "paye" | "offert" | "inconnu";
+
+/** Détail lisible de l'origine d'un ticket (sous-libellé). */
+const DETAIL_SOURCE: Record<TicketSource, string> = {
+  paid: "Acheté",
+  welcome: "Séance d'essai",
+  referral: "Parrainage",
+  admin: "Geste commercial",
+};
+
+/**
+ * Classe la source d'un ticket en catégorie d'affichage (payé / offert / inconnu).
+ * Pur, sans I/O — testable et réutilisable côté UI comme serveur.
+ */
+export function categoriserSourceTicket(
+  source: TicketSource | null | undefined,
+): CategorieSourceTicket {
+  if (source === "paid") return "paye";
+  if (source === "welcome" || source === "referral" || source === "admin") {
+    return "offert";
+  }
+  return "inconnu";
+}
+
+/**
+ * Sous-libellé fin de l'origine d'un ticket (« Parrainage », « Séance d'essai »…).
+ * `null` si la source est inconnue/absente (pas de précision à afficher).
+ */
+export function detailSourceTicket(
+  source: TicketSource | null | undefined,
+): string | null {
+  if (!source) return null;
+  return DETAIL_SOURCE[source] ?? null;
 }
 
 /**

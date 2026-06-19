@@ -16,7 +16,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { listEvents } from "@/lib/google-calendar";
 import { deduireTypeDepuisEvent, fenetreCreneaux } from "@/lib/reservation";
 import { createLogger, serializeError } from "@/lib/log";
-import type { BookingStatus, TicketType } from "@/lib/db-types";
+import type { BookingStatus, TicketSource, TicketType } from "@/lib/db-types";
 import type { AttendanceValue } from "@/app/api/admin/bookings/_logic";
 
 const log = createLogger("admin/reservations");
@@ -55,6 +55,15 @@ export interface ReservationAdmin {
   creneauTitre: string | null;
   /** Lieu du créneau (location Google), si résolu. */
   creneauLieu: string | null;
+  /**
+   * Origine du ticket consommé par cette réservation :
+   *   - 'paid'                          → place payée (Stripe) ;
+   *   - 'welcome' | 'referral' | 'admin'→ place offerte (essai / parrainage / geste) ;
+   *   - null                            → booking sans ticket rattaché OU ticket
+   *                                       historique (`source` non renseignée).
+   * Résolu via la FK `bookings.ticket_id` → `tickets.source` (batch, pas de N+1).
+   */
+  ticketSource: TicketSource | null;
 }
 
 /** Un créneau Google à venir (cible possible pour un déplacement). */
@@ -97,6 +106,8 @@ interface BookingRow {
   created_at: string;
   cancelled_at: string | null;
   attendance: AttendanceValue | null;
+  /** FK vers le ticket consommé (origine payé/offert). Null si aucun. */
+  ticket_id: string | null;
 }
 
 interface CreneauMeta {
@@ -141,7 +152,7 @@ export async function chargerReservationsAdmin(
     service
       .from("bookings")
       .select(
-        "id, user_id, type, status, google_event_id, google_calendar_creneau_id, starts_at, ends_at, created_at, cancelled_at, attendance",
+        "id, user_id, type, status, google_event_id, google_calendar_creneau_id, starts_at, ends_at, created_at, cancelled_at, attendance, ticket_id",
       )
       .order("starts_at", { ascending: false }),
     chargerCreneauxGoogle(maintenant),
@@ -169,9 +180,14 @@ export async function chargerReservationsAdmin(
     });
   }
 
-  const reservations: ReservationAdmin[] = (
-    (bookingsRes.data ?? []) as BookingRow[]
-  ).map((b) => {
+  const bookings = (bookingsRes.data ?? []) as BookingRow[];
+
+  // Origine du ticket consommé par chaque résa : on lit `tickets.source` pour
+  // tous les `ticket_id` référencés, en UN SEUL appel (batch `.in(...)`, pas de
+  // N+1). Index `id → source` pour enrichir ensuite chaque booking en O(1).
+  const sourceParTicket = await chargerSourcesTickets(service, bookings);
+
+  const reservations: ReservationAdmin[] = bookings.map((b) => {
     const { nom, email, telephone } = libelleClient(profilsParId.get(b.user_id));
     const meta = b.google_calendar_creneau_id
       ? metaParEvent.get(b.google_calendar_creneau_id)
@@ -192,6 +208,9 @@ export async function chargerReservationsAdmin(
       creneauId: b.google_calendar_creneau_id,
       creneauTitre: meta?.summary ?? null,
       creneauLieu: meta?.lieu ?? null,
+      ticketSource: b.ticket_id
+        ? (sourceParTicket.get(b.ticket_id) ?? null)
+        : null,
     };
   });
 
@@ -226,4 +245,51 @@ async function chargerCreneauxGoogle(maintenant: Date) {
     log.error("listEvents indisponible", { err: serializeError(err) });
     return [];
   }
+}
+
+/**
+ * Construit l'index `ticket_id → source` pour tous les tickets consommés par les
+ * bookings fournis. UN SEUL appel Supabase (`.in('id', [...])`) → pas de N+1.
+ *
+ * Tolère l'échec/lecture vide : renvoie une map vide → les réservations
+ * concernées tombent sur `ticketSource = null` (affiché « source inconnue »),
+ * sans casser la page.
+ */
+async function chargerSourcesTickets(
+  service: ReturnType<typeof createServiceClient>,
+  bookings: BookingRow[],
+): Promise<Map<string, TicketSource | null>> {
+  const map = new Map<string, TicketSource | null>();
+
+  // Ids de tickets distincts effectivement référencés (dédup → requête minimale).
+  const ticketIds = [
+    ...new Set(
+      bookings
+        .map((b) => b.ticket_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (ticketIds.length === 0) return map;
+
+  const { data, error } = await service
+    .from("tickets")
+    .select("id, source")
+    .in("id", ticketIds);
+
+  if (error) {
+    log.error("lecture tickets.source échouée", { err: serializeError(error) });
+    return map;
+  }
+
+  for (const t of (data ?? []) as Array<{ id: string; source: unknown }>) {
+    map.set(t.id, normSource(t.source));
+  }
+  return map;
+}
+
+/** Normalise une valeur `source` douteuse vers un `TicketSource` strict ou null. */
+function normSource(s: unknown): TicketSource | null {
+  return s === "paid" || s === "welcome" || s === "referral" || s === "admin"
+    ? s
+    : null;
 }
