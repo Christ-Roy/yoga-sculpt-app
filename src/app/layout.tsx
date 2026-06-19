@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Anton, Inter } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/toast";
 
 const anton = Anton({
   variable: "--font-anton",
@@ -45,7 +46,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="fr" className={`${anton.variable} ${inter.variable} h-full`}>
-      <body className="min-h-full bg-bg text-text antialiased">{children}</body>
+      <body className="min-h-full bg-bg text-text antialiased">
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

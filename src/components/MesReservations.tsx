@@ -12,7 +12,8 @@ import {
 import type { SeanceAgenda } from "@/lib/calendar-export";
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { LieuMaps } from "@/components/LieuMaps";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast } from "@/components/ui/toast";
+import { Spinner } from "@/components/ui/spinner";
 
 /**
  * « Mes réservations » — bookings CONFIRMÉS à venir du user.
@@ -71,10 +72,7 @@ export function MesReservations({
 }) {
   const [bookings, setBookings] = useState<BookingAffichage[]>(bookingsInitiaux);
   const [enCours, setEnCours] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: ToastVariant;
-  } | null>(null);
+  const { toast } = useToast();
 
   async function annuler(b: BookingAffichage) {
     setEnCours(b.id);
@@ -86,37 +84,28 @@ export function MesReservations({
       });
       if (res.ok) {
         setBookings((list) => list.filter((x) => x.id !== b.id));
-        setToast({ message: "Réservation annulée.", variant: "success" });
+        toast("Réservation annulée.", "success");
         return;
       }
       if (res.status === 403) {
-        setToast({
-          message: "Cette réservation ne vous appartient pas.",
-          variant: "error",
-        });
+        toast("Cette réservation ne vous appartient pas.", "error");
         return;
       }
       if (res.status === 404) {
         // Déjà supprimée côté serveur : on retire localement.
         setBookings((list) => list.filter((x) => x.id !== b.id));
-        setToast({ message: "Réservation introuvable.", variant: "error" });
+        toast("Réservation introuvable.", "error");
         return;
       }
       if (res.status === 409) {
         // Garde serveur 24h (tooLate) : la séance est passée sous le seuil
         // depuis l'affichage. On garde la carte et on explique le refus.
-        setToast({
-          message: "Annulation impossible à moins de 24h du cours.",
-          variant: "error",
-        });
+        toast("Annulation impossible à moins de 24h du cours.", "error");
         return;
       }
-      setToast({
-        message: "L'annulation a échoué. Réessayez.",
-        variant: "error",
-      });
+      toast("L'annulation a échoué. Réessayez.", "error");
     } catch {
-      setToast({ message: "Problème de connexion. Réessayez.", variant: "error" });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setEnCours(null);
     }
@@ -185,7 +174,14 @@ export function MesReservations({
                     }
                     className="inline-flex min-h-[44px] w-full items-center justify-center rounded-[4px] border border-border bg-surface px-4 py-2.5 text-sm font-medium text-text transition-colors hover:border-red-500/50 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-auto"
                   >
-                    {enCours === b.id ? "Annulation…" : "Annuler"}
+                    {enCours === b.id ? (
+                      <>
+                        <Spinner />
+                        Annulation…
+                      </>
+                    ) : (
+                      "Annuler"
+                    )}
                   </button>
                 </div>
               </div>
@@ -206,14 +202,6 @@ export function MesReservations({
           );
         })}
       </ul>
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }

@@ -14,7 +14,8 @@ import { AddToCalendar } from "@/components/AddToCalendar";
 import { BuyTickets } from "@/components/BuyTickets";
 import { LieuMaps } from "@/components/LieuMaps";
 import { ReserverParticulierLibre } from "@/components/ReserverParticulierLibre";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast } from "@/components/ui/toast";
+import { Spinner } from "@/components/ui/spinner";
 
 /**
  * Calendrier de réservation MAISON (remplace l'embed Cal.com).
@@ -71,25 +72,23 @@ export function ReserverClient({
   // Créneau dont la réservation est en cours (spinner ciblé).
   const [enCours, setEnCours] = useState<string | null>(null);
 
-  // Init paresseuse : le statut Stripe est connu dès le render (searchParams),
-  // donc on calcule le toast initial directement plutôt que via un effect
-  // (évite un setState synchrone dans useEffect → cascading renders).
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: ToastVariant;
-  } | null>(() => {
+  const { toast } = useToast();
+
+  // Toast de retour Stripe (?status=success|cancel). Émis une fois au montage
+  // (le statut est connu dès le 1er render via searchParams). Effect plutôt que
+  // l'ancien init paresseux car le toast est désormais géré par le provider.
+  useEffect(() => {
     if (statusParam === "success") {
-      return {
-        message:
-          "Paiement reçu, merci ! Vos tickets sont crédités sous quelques secondes.",
-        variant: "success",
-      };
+      toast(
+        "Paiement reçu, merci ! Vos tickets sont crédités sous quelques secondes.",
+        "success",
+      );
+    } else if (statusParam === "cancel") {
+      toast("Paiement annulé.", "error");
     }
-    if (statusParam === "cancel") {
-      return { message: "Paiement annulé.", variant: "error" };
-    }
-    return null;
-  });
+    // Volontairement au montage uniquement (statusParam est figé pour la page).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Type à mettre en avant dans le bloc d'achat (après un 402).
   const [achatType, setAchatType] = useState<TicketType | null>(null);
@@ -152,7 +151,7 @@ export function ReserverClient({
           ...s,
           [c.type]: Math.max(0, s[c.type] - 1),
         }));
-        setToast({ message: "Séance réservée !", variant: "success" });
+        toast("Séance réservée !", "success");
         return;
       }
 
@@ -160,11 +159,10 @@ export function ReserverClient({
         // Pas de ticket du bon type → ouvre le bloc d'achat ciblé.
         const data = (await res.json()) as { type?: TicketType };
         setAchatType(data.type ?? c.type);
-        setToast({
-          message:
-            "Vous n'avez pas de ticket pour ce cours. Choisissez une formule ci-dessous.",
-          variant: "error",
-        });
+        toast(
+          "Vous n'avez pas de ticket pour ce cours. Choisissez une formule ci-dessous.",
+          "error",
+        );
         // Laisse le state s'appliquer avant de scroller vers le bloc d'achat.
         requestAnimationFrame(() => {
           achatRef.current?.scrollIntoView({
@@ -176,32 +174,20 @@ export function ReserverClient({
       }
 
       if (res.status === 409) {
-        setToast({
-          message: "Vous avez déjà réservé ce créneau.",
-          variant: "error",
-        });
+        toast("Vous avez déjà réservé ce créneau.", "error");
         return;
       }
 
       if (res.status === 404) {
-        setToast({
-          message: "Ce créneau n'est plus disponible.",
-          variant: "error",
-        });
+        toast("Ce créneau n'est plus disponible.", "error");
         // Recharge pour retirer le créneau disparu.
         void charger();
         return;
       }
 
-      setToast({
-        message: "La réservation a échoué. Réessayez dans un instant.",
-        variant: "error",
-      });
+      toast("La réservation a échoué. Réessayez dans un instant.", "error");
     } catch {
-      setToast({
-        message: "Problème de connexion. Réessayez.",
-        variant: "error",
-      });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setEnCours(null);
     }
@@ -228,15 +214,14 @@ export function ReserverClient({
               particulier: Math.max(0, s.particulier - 1),
             }));
             setReserves((r) => ({ ...r, [booking.google_event_id]: booking.id }));
-            setToast({ message: "Séance réservée !", variant: "success" });
+            toast("Séance réservée !", "success");
           }}
           onNeedsPurchase={(type) => {
             setAchatType(type);
-            setToast({
-              message:
-                "Vous n'avez pas de ticket pour ce cours. Choisissez une formule ci-dessous.",
-              variant: "error",
-            });
+            toast(
+              "Vous n'avez pas de ticket pour ce cours. Choisissez une formule ci-dessous.",
+              "error",
+            );
             requestAnimationFrame(() => {
               achatRef.current?.scrollIntoView({
                 behavior: "smooth",
@@ -244,7 +229,7 @@ export function ReserverClient({
               });
             });
           }}
-          onError={(message) => setToast({ message, variant: "error" })}
+          onError={(message) => toast(message, "error")}
         />
       </section>
 
@@ -307,14 +292,6 @@ export function ReserverClient({
       <div ref={achatRef}>
         <BuyTickets highlightType={achatType} />
       </div>
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }
@@ -414,10 +391,17 @@ function CreneauCard({
               type="button"
               onClick={onReserver}
               disabled={enCours}
-              className="inline-flex min-h-[44px] w-full items-center justify-center rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-auto"
+              className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-auto"
               aria-label={`Réserver le ${formaterDateLongueFr(creneau.starts_at)} à ${formaterPlageFr(creneau.starts_at, creneau.ends_at)}`}
             >
-              {enCours ? "Réservation…" : "Réserver"}
+              {enCours ? (
+                <>
+                  <Spinner />
+                  Réservation…
+                </>
+              ) : (
+                "Réserver"
+              )}
             </button>
           )}
         </div>

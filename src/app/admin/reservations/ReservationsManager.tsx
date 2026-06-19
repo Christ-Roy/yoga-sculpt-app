@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { formatDateHeure, formatDate, formatPlage } from "@/lib/admin-format";
 import { TypeBadge } from "@/components/admin/TypeBadge";
 import { StatusBadge } from "@/components/admin/StatusBadge";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { CreneauCible, ReservationAdmin } from "./_data";
 import type { TicketType, BookingStatus } from "@/lib/db-types";
@@ -55,9 +55,7 @@ export function ReservationsManager({
   const [creneauFiltre, setCreneauFiltre] = useState<string>("all");
   const [recherche, setRecherche] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(
-    null,
-  );
+  const { toast } = useToast();
 
   // Dialog d'annulation : on capture la résa ciblée + les options.
   const [cancelCible, setCancelCible] = useState<ReservationAdmin | null>(null);
@@ -150,25 +148,24 @@ export function ReservationsManager({
               : r,
           ),
         );
-        setToast({ message: "Réservation annulée.", variant: "success" });
+        toast("Réservation annulée.", "success");
         setCancelCible(null);
         return;
       }
       if (res.status === 409) {
-        setToast({
-          message:
-            "Séance à moins de 24h. Cochez « Forcer l'annulation » pour outrepasser.",
-          variant: "error",
-        });
+        toast(
+          "Séance à moins de 24h. Cochez « Forcer l'annulation » pour outrepasser.",
+          "error",
+        );
         return;
       }
       if (res.status === 404) {
-        setToast({ message: "Réservation introuvable.", variant: "error" });
+        toast("Réservation introuvable.", "error");
         return;
       }
-      setToast({ message: "L'annulation a échoué. Réessayez.", variant: "error" });
+      toast("L'annulation a échoué. Réessayez.", "error");
     } catch {
-      setToast({ message: "Problème de connexion. Réessayez.", variant: "error" });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setBusyId(null);
     }
@@ -206,28 +203,22 @@ export function ReservationsManager({
               : r,
           ),
         );
-        setToast({ message: "Réservation déplacée.", variant: "success" });
+        toast("Réservation déplacée.", "success");
         setMoveCible(null);
         setMoveTarget("");
         return;
       }
       if (res.status === 409) {
-        setToast({
-          message: "Cette cliente est déjà inscrite sur ce créneau.",
-          variant: "error",
-        });
+        toast("Cette cliente est déjà inscrite sur ce créneau.", "error");
         return;
       }
       if (res.status === 422) {
-        setToast({
-          message: "Créneau cible incompatible (type différent).",
-          variant: "error",
-        });
+        toast("Créneau cible incompatible (type différent).", "error");
         return;
       }
-      setToast({ message: "Le déplacement a échoué. Réessayez.", variant: "error" });
+      toast("Le déplacement a échoué. Réessayez.", "error");
     } catch {
-      setToast({ message: "Problème de connexion. Réessayez.", variant: "error" });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setBusyId(null);
     }
@@ -252,13 +243,13 @@ export function ReservationsManager({
         setReservations((list) =>
           list.map((x) => (x.id === r.id ? { ...x, attendance: precedent } : x)),
         );
-        setToast({ message: "Pointage impossible. Réessayez.", variant: "error" });
+        toast("Pointage impossible. Réessayez.", "error");
       }
     } catch {
       setReservations((list) =>
         list.map((x) => (x.id === r.id ? { ...x, attendance: precedent } : x)),
       );
-      setToast({ message: "Problème de connexion. Réessayez.", variant: "error" });
+      toast("Problème de connexion. Réessayez.", "error");
     } finally {
       setBusyId(null);
     }
@@ -441,14 +432,6 @@ export function ReservationsManager({
           </div>
         )}
       </ConfirmDialog>
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }
