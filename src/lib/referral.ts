@@ -14,10 +14,27 @@
  *
  * Runtime edge (Cloudflare Workers) : fetch + Web Crypto uniquement.
  *
- * TODO (post-V2b, décision Robert) : conditionner le crédit du ticket de
- * parrainage à la publication d'un AVIS Google par le filleul (et non au seul
- * fait de s'inscrire). À brancher ici, dans `completerReferral`, comme garde
- * supplémentaire avant `crediterTicketParrain` — NE PAS implémenter maintenant.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ ANTI-FARMING (2026-06-19) — LE CRÉDIT N'EST PLUS DÉCLENCHÉ À L'INSCRIPTION │
+ * │                                                                           │
+ * │ Avant : `completerReferral` créditait le parrain dès que le filleul       │
+ * │ s'inscrivait (callback auth / POST /completer). Farmable : il suffisait    │
+ * │ de créer de faux comptes (ou de faire (re)cliquer des comptes EXISTANTS)  │
+ * │ pour récolter des tickets sans aucune acquisition réelle.                  │
+ * │                                                                           │
+ * │ Maintenant : à l'inscription, `completerReferral` se contente de LIER le  │
+ * │ filleul au parrain en `pending` (referral créé/rattaché, AUCUN ticket).   │
+ * │ Le crédit (1 ticket au parrain) n'a lieu qu'au moment où le filleul a sa  │
+ * │ 1re séance réellement HONORÉE (`bookings.attendance='attended'`, pointée  │
+ * │ par Alice), via `crediterParrainsApresSeanceHonoree` appelée depuis la     │
+ * │ route admin attendance. Un faux compte / un compte existant qui ne vient   │
+ * │ jamais en cours ne rapporte donc RIEN. C'est le levier qui tue le farming. │
+ * │                                                                           │
+ * │ L'anti-abus (canCreditReferral : email jetable, IP/fp partagés, R4) +     │
+ * │ le plafond (maxParrainagesCredites) + l'idempotence + la compensation de  │
+ * │ course sont RÉ-ÉVALUÉS au moment du crédit (signaux account_signals déjà   │
+ * │ persistés), pas à l'inscription → durcissement, pas de régression.         │
+ * └─────────────────────────────────────────────────────────────────────────┘
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -388,25 +405,39 @@ async function crediterTicketParrain(
   return true;
 }
 
-/** Résultat de `completerReferral` (volontairement non révélateur). */
-export type CompleteResult =
-  | { credited: true } // un ticket a été crédité au parrain.
-  | { credited: false }; // rien crédité (pas de referral, ou anti-abus, ou déjà fait).
+/**
+ * Résultat de `completerReferral` (volontairement non révélateur).
+ *
+ * ⚠️ Depuis le durcissement anti-farming (2026-06-19), `completerReferral` NE
+ * CRÉDITE PLUS à l'inscription → `credited` y vaut TOUJOURS `false`. Le champ
+ * est conservé pour la stabilité du contrat appelant ; le crédit réel se mesure
+ * au moment de la séance honorée (cf. `crediterParrainsApresSeanceHonoree`).
+ * `linked` indique seulement si le filleul a bien été rattaché au parrain
+ * (referral pending posé) — utile au tracking interne, jamais exposé au client.
+ */
+export type CompleteResult = {
+  /** TOUJOURS false à l'inscription (le crédit est déféré à la séance honorée). */
+  credited: false;
+  /** True si le filleul a été rattaché au parrain (referral pending posé). */
+  linked: boolean;
+};
 
 /**
- * Complète le parrainage d'un filleul qui vient de s'inscrire avec un `code`.
+ * Lie le filleul qui vient de s'inscrire (cookie `ys_ref`) à son parrain — SANS
+ * créditer. Le crédit est DÉFÉRÉ à la 1re séance honorée du filleul (anti-farming,
+ * cf. en-tête de module + `crediterParrainsApresSeanceHonoree`).
  *
  * ÉTAPES :
  *   1. Résoudre le parrain via le code (profiles.referral_code). Code inconnu
- *      → on s'arrête (credited:false), silencieux.
+ *      → on s'arrête (linked:false), silencieux.
  *   2. Garde anti-auto-parrainage trivial : un user ne se parraine pas lui-même.
- *   3. Anti-abus : canCreditReferral (IP / fingerprint / email jetable / déjà
- *      crédité). Refus → credited:false, SILENCIEUX (referral laissé pending).
- *   4. Trouver/lier le referral : on rattache un referral pending existant
- *      (invitation par e-mail) si présent, sinon on en crée un (cas « code
- *      partagé par lien », sans invitation e-mail préalable).
- *   5. Idempotence : si ce referral est déjà ticket_credite → credited:false.
- *   6. Créditer le ticket au parrain + marquer le referral completed/credité.
+ *   3. Rattacher (ou créer) le referral en `pending` avec `filleul_user_id`,
+ *      `ticket_credite=false`. AUCUN ticket n'est crédité ici, AUCUN anti-abus
+ *      n'est évalué (il le sera au crédit, sur signaux persistés) — on se
+ *      contente de poser le lien pour qu'il existe au moment de la séance.
+ *
+ * Idempotent : rejouer /completer ne re-crée pas de doublon (unique
+ * (parrain,email) + `ticket_credite` jamais touché ici).
  *
  * ⚠️ Quelle que soit l'issue, l'APPELANT doit répondre de façon NEUTRE au
  * client : ce booléen n'est jamais exposé tel quel à l'UI du filleul.
@@ -422,7 +453,7 @@ export async function completerReferral(
   },
 ): Promise<CompleteResult> {
   const code = params.code.trim().toUpperCase();
-  if (!code) return { credited: false };
+  if (!code) return { credited: false, linked: false };
 
   // 1) Résoudre le parrain via son code.
   const { data: parrainProfile, error: parrainErr } = await service
@@ -433,84 +464,172 @@ export async function completerReferral(
 
   if (parrainErr) {
     log.error("Résolution code parrain échouée", { db: parrainErr.message });
-    return { credited: false };
+    return { credited: false, linked: false };
   }
   if (!parrainProfile?.id) {
     // Code inconnu → silencieux.
-    return { credited: false };
+    return { credited: false, linked: false };
   }
   const parrainUserId = parrainProfile.id as string;
 
   // 2) Un user ne se parraine pas lui-même.
   if (parrainUserId === params.filleulUserId) {
-    return { credited: false };
+    return { credited: false, linked: false };
   }
 
-  // 3) Anti-abus — refus SILENCIEUX. On laisse tout referral éventuel en pending.
-  const ok = await canCreditReferral(service, {
+  // 3) Rattacher le filleul en pending (le crédit viendra à la séance honorée).
+  //    On NE crédite PAS, on NE fait PAS l'anti-abus ici (déféré au crédit, sur
+  //    signaux persistés) : on pose juste le lien parrain↔filleul.
+  await lierFilleulSansCrediter(service, {
+    parrainUserId,
+    code,
     filleulUserId: params.filleulUserId,
+    filleulEmail: params.filleulEmail,
+  });
+
+  return { credited: false, linked: true };
+}
+
+/**
+ * Crédite les PARRAINS dont `filleulUserId` est le filleul, dès lors que ce
+ * filleul a une 1re séance réellement HONORÉE (`bookings.attendance='attended'`).
+ * Appelée depuis la route admin attendance au moment où Alice pointe « présent ».
+ *
+ * C'est ICI que tombe le ticket de parrainage (plus à l'inscription) : un faux
+ * compte / un compte existant qui ne vient jamais en cours ne sera jamais pointé
+ * présent → le parrain n'est jamais crédité (anti-farming, cf. en-tête).
+ *
+ * Pour chaque referral `pending` non encore crédité liant ce filleul :
+ *   - ré-évalue l'anti-abus (canCreditReferral, signaux persistés) + le plafond ;
+ *   - crédite 1 ticket au parrain, marque le referral completed/credité ;
+ *   - idempotent (le `.eq('ticket_credite', false)` du marquage garantit un seul
+ *     crédit, même si l'attendance est repointée plusieurs fois) ;
+ *   - best-effort : ne throw JAMAIS (un échec de crédit ne doit pas faire échouer
+ *     le pointage de présence d'Alice). Toute erreur est loggée.
+ *
+ * @returns le nombre de referrals effectivement crédités (≥ 0).
+ */
+export async function crediterParrainsApresSeanceHonoree(
+  service: SupabaseClient,
+  filleulUserId: string,
+): Promise<number> {
+  if (!filleulUserId) return 0;
+
+  try {
+    // Referrals où ce user est filleul, en attente de crédit. En théorie au plus
+    // un (unique (parrain,email) + R4 = 1 crédit/filleul à vie), mais on boucle
+    // par robustesse (un même filleul a pu être lié par plusieurs parrains avant
+    // qu'un crédit ne soit posé ; R4 tranchera au crédit).
+    const { data: pendings, error: listErr } = await service
+      .from("referrals")
+      .select("id, parrain_user_id, filleul_email")
+      .eq("filleul_user_id", filleulUserId)
+      .eq("ticket_credite", false)
+      .eq("status", "pending");
+
+    if (listErr) {
+      log.error("Liste referrals pending du filleul échouée", {
+        filleul_user_id: filleulUserId,
+        db: listErr.message,
+      });
+      return 0;
+    }
+    const rows = (pendings ?? []) as Array<{
+      id: string;
+      parrain_user_id: string;
+      filleul_email: string;
+    }>;
+    if (rows.length === 0) return 0;
+
+    // Signaux persistés du filleul (IP/fingerprint posés à l'inscription) :
+    // servent à ré-évaluer l'anti-abus AU CRÉDIT (pas de Request ici, c'est
+    // Alice qui pointe). Best-effort : absents → null (R2/R3 skippées, comme
+    // pour un compte sans signal).
+    const { ip: filleulIp, fingerprint: filleulFp } = await lireSignauxFilleul(
+      service,
+      filleulUserId,
+    );
+
+    let credites = 0;
+    for (const ref of rows) {
+      // Garde anti-auto (défense en profondeur : déjà filtré à la liaison).
+      if (ref.parrain_user_id === filleulUserId) continue;
+
+      const ok = await crediterReferralPending(service, {
+        referralId: ref.id,
+        parrainUserId: ref.parrain_user_id,
+        filleulUserId,
+        filleulEmail: ref.filleul_email,
+        ip: filleulIp,
+        fingerprint: filleulFp,
+      });
+      if (ok) credites += 1;
+    }
+    return credites;
+  } catch (err) {
+    // Best-effort absolu : le pointage de présence ne doit jamais échouer pour ça.
+    log.error("Exception crédit parrains après séance honorée", {
+      filleul_user_id: filleulUserId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
+}
+
+/** Lit les signaux anti-abus persistés d'un filleul (IP + fingerprint). */
+async function lireSignauxFilleul(
+  service: SupabaseClient,
+  filleulUserId: string,
+): Promise<{ ip: string | null; fingerprint: string | null }> {
+  try {
+    const { data } = await service
+      .from("account_signals")
+      .select("ip_creation, device_fingerprint")
+      .eq("user_id", filleulUserId)
+      .maybeSingle();
+    return {
+      ip: (data?.ip_creation as string | null) ?? null,
+      fingerprint: (data?.device_fingerprint as string | null) ?? null,
+    };
+  } catch {
+    return { ip: null, fingerprint: null };
+  }
+}
+
+/**
+ * Crédite UN referral pending donné (anti-abus + plafond + ticket + marquage
+ * idempotent + attribution Ads + compensation de course). Cœur partagé du crédit
+ * de parrainage, appelé désormais UNIQUEMENT depuis le déclencheur « séance
+ * honorée » (`crediterParrainsApresSeanceHonoree`).
+ *
+ * @returns `true` si un ticket a été crédité, `false` sinon (anti-abus, plafond,
+ *          déjà crédité, erreur DB — toujours SÛR/silencieux).
+ */
+async function crediterReferralPending(
+  service: SupabaseClient,
+  params: {
+    referralId: string;
+    parrainUserId: string;
+    filleulUserId: string;
+    filleulEmail: string;
+    ip: string | null;
+    fingerprint: string | null;
+  },
+): Promise<boolean> {
+  const { referralId, parrainUserId, filleulUserId } = params;
+
+  // 1) Anti-abus — refus SILENCIEUX (laisse le referral pending, jamais crédité).
+  const ok = await canCreditReferral(service, {
+    filleulUserId,
     filleulEmail: params.filleulEmail,
     ip: params.ip,
     fingerprint: params.fingerprint,
   });
-  if (!ok) {
-    // On rattache quand même le filleul à un referral pending existant (pour la
-    // traçabilité côté parrain : « invité, inscrit, mais non validé »), sans
-    // jamais créditer ni révéler la raison.
-    await lierFilleulSansCrediter(service, {
-      parrainUserId,
-      code,
-      filleulUserId: params.filleulUserId,
-      filleulEmail: params.filleulEmail,
-    });
-    return { credited: false };
-  }
+  if (!ok) return false;
 
-  // 4) Trouver un referral pending (invitation par e-mail) sinon en créer un.
-  const filleulEmail = normaliserEmail(params.filleulEmail);
-  const { data: pending } = await service
-    .from("referrals")
-    .select("id, ticket_credite")
-    .eq("parrain_user_id", parrainUserId)
-    .eq("filleul_email", filleulEmail)
-    .maybeSingle();
-
-  let referralId: string | null = pending?.id ?? null;
-
-  // 5) Idempotence : déjà crédité → on ne refait rien.
-  if (pending?.ticket_credite) {
-    return { credited: false };
-  }
-
-  if (!referralId) {
-    // Pas d'invitation préalable (le filleul a juste suivi un lien `?ref=CODE`).
-    // On crée le referral à la volée.
-    const { data: created, error: createErr } = await service
-      .from("referrals")
-      .insert({
-        parrain_user_id: parrainUserId,
-        filleul_email: filleulEmail,
-        filleul_user_id: params.filleulUserId,
-        code,
-        status: "pending",
-      })
-      .select("id")
-      .single();
-    if (createErr || !created) {
-      log.error("Création referral à la volée échouée", {
-        parrain_user_id: parrainUserId,
-        filleul_user_id: params.filleulUserId,
-        db: createErr?.message,
-      });
-      return { credited: false };
-    }
-    referralId = created.id as string;
-  }
-
-  // 5bis) PLAFOND (anti-farming) : un parrain est crédité au maximum
-  // `maxParrainagesCredites()` fois (1 ticket par filleul). Au-delà, on lie le
-  // filleul pour la traçabilité mais on ne crédite plus. Plafond configurable via
-  // `REFERRAL_MAX_CREDITS` (défaut métier 3). (count exact via head:true)
+  // 2) PLAFOND (anti-farming) : un parrain est crédité au maximum
+  //    `maxParrainagesCredites()` fois (1 ticket par filleul). Plafond
+  //    configurable via `REFERRAL_MAX_CREDITS` (défaut métier 3).
   const plafond = maxParrainagesCredites();
   const { count: dejaCredites, error: countErr } = await service
     .from("referrals")
@@ -522,35 +641,23 @@ export async function completerReferral(
       parrain_user_id: parrainUserId,
       db: countErr.message,
     });
-    return { credited: false };
+    return false;
   }
   if ((dejaCredites ?? 0) >= plafond) {
-    // Plafond atteint : on ne crédite plus, mais le filleul reste rattaché.
-    return { credited: false };
+    // Plafond atteint : on ne crédite plus, le referral reste pending.
+    return false;
   }
 
-  // TODO(anti-abus): créditer après la 1ère séance HONORÉE du filleul (booking
-  // passé + bookings.attendance='attended') plutôt qu'à l'inscription (cf. todo
-  // 2026-06-19-qa-secu-parrainage-anti-abus-farmable, levier 1). C'est le levier
-  // qui tue le farming (un faux compte ne va pas en cours), mais il déplace le
-  // déclencheur du crédit vers le cron d'attendance → recâblage non trivial,
-  // laissé hors de ce commit pour ne pas fragiliser le flux d'inscription.
-
-  // 6) Créditer le ticket au parrain, PUIS marquer le referral (ordre choisi
-  // pour ne jamais marquer « crédité » sans ticket réel). On verrouille la
-  // marque par `ticket_credite = false` pour rester idempotent face à un appel
-  // concurrent (deux complétions simultanées → une seule passe).
+  // 3) Créditer le ticket au parrain, PUIS marquer le referral (ordre choisi
+  //    pour ne jamais marquer « crédité » sans ticket réel). On verrouille la
+  //    marque par `ticket_credite = false` pour rester idempotent face à un
+  //    appel concurrent (deux pointages simultanés → une seule passe).
   const credited = await crediterTicketParrain(service, parrainUserId);
-  if (!credited) {
-    return { credited: false };
-  }
+  if (!credited) return false;
 
   // ── ATTRIBUTION ADS — VALEUR FILLEUL (intérêts composés). ───────────────────
-  // Un filleul vient d'être validé : on attribue sa valeur au gclid du PARRAIN
-  // (s'il vient de l'Ads). C'est ce qui rend un user acquis via Ads plus rentable
-  // que sa seule 1re dépense — il ramène un réseau. Valeur = équivalent d'une
-  // séance offerte au parrain (le ticket qu'il gagne) ≈ FREE_TICKET_VALUE_EUR.
-  // Idempotent sur referralId (un filleul = une conversion). Best-effort.
+  // Un filleul vient d'être validé (séance honorée) : on attribue sa valeur au
+  // gclid du PARRAIN (s'il vient de l'Ads). Idempotent sur referralId. Best-effort.
   {
     const parrainGclid = await getUserGclid(service, parrainUserId);
     await recordAdsConversion(service, {
@@ -567,7 +674,7 @@ export async function completerReferral(
     .update({
       status: "completed",
       ticket_credite: true,
-      filleul_user_id: params.filleulUserId,
+      filleul_user_id: filleulUserId,
       completed_at: new Date().toISOString(),
     })
     .eq("id", referralId)
@@ -582,26 +689,27 @@ export async function completerReferral(
       db: markErr.message,
     });
     // Le ticket est déjà inséré : on log, mais on considère le crédit fait.
-    return { credited: true };
+    return true;
   }
   if (!marked) {
     // Un appel concurrent a déjà marqué ce referral entre-temps → on vient de
     // créer un ticket en doublon. Compensation : on le retire (best-effort).
-    // (Cas extrêmement rare ; on préfère recréditer juste 1 ticket.)
     log.warn("Course détectée sur le marquage — rollback du ticket doublon", {
       referral_id: referralId,
       parrain_user_id: parrainUserId,
     });
     await retirerDernierTicketParrainage(service, parrainUserId);
-    return { credited: false };
+    return false;
   }
 
-  return { credited: true };
+  return true;
 }
 
 /**
  * Rattache un filleul à un referral pending existant (ou en crée un en pending)
- * SANS créditer — utilisé quand l'anti-abus refuse. Best-effort, silencieux.
+ * SANS créditer. C'est désormais le chemin NOMINAL à l'inscription (le crédit est
+ * déféré à la séance honorée), et aussi le filet de traçabilité. Best-effort,
+ * silencieux : ne crédite jamais, ne touche jamais `ticket_credite`.
  */
 async function lierFilleulSansCrediter(
   service: SupabaseClient,

@@ -1,7 +1,27 @@
 # [P3] QA sécu — Rate limiting sur la landing publique /invitation (sévérité BASSE)
 
-**Statut** : à faire (faible priorité) · **Qui** : agent (nécessite une décision infra Robert) ·
-**Source** : passe sécu 2026-06-19 (sous-ticket de `2026-06-19-passe-securite-features-livrees.md`)
+**Statut** : garde-fou anti-flood CODE livré (best-effort) · reste la règle WAF côté CF (décision/infra Robert) ·
+**Qui** : agent (code) + Robert (dashboard CF) · **Source** : passe sécu 2026-06-19
+(sous-ticket de `2026-06-19-passe-securite-features-livrees.md`)
+
+## ✅ LIVRÉ 2026-06-19 — anti-flood edge-safe SANS dépendance/binding
+Rate-limit in-memory (fixed-window, 30 req/60 s/IP via `CF-Connecting-IP`) appliqué
+dans le **middleware** SUR `/invitation` uniquement, AVANT tout I/O session →
+dépassement = `429` + `Retry-After`. Fichiers : `src/lib/rate-limit.ts` (module pur,
+edge-safe, cap mémoire anti-fuite, fail-open sans IP), `src/middleware.ts` (branchement),
+tests `__tests__/lib/rate-limit.test.ts`.
+
+⚠️ **C'est best-effort, PAS une garantie** : l'état est local à l'isolate Cloudflare
+(non partagé entre isolates, volatil) → ça casse un flood NAÏF depuis une même IP sur
+un même isolate, mais un attaquant réparti sur plusieurs isolates peut passer outre.
+À coût ~nul (aucune I/O, aucune dépendance, aucun binding). La VRAIE défense durable
+reste l'Option A ci-dessous (à faire par Robert).
+
+## 🔴 RESTE À FAIRE (Robert) — règle Cloudflare Rate Limiting / WAF (Option A)
+Poser une règle CF Rate Limiting sur le path `/invitation` (ex. 30 req/min/IP) au
+niveau du dashboard. Zéro code, réversible en un clic, état partagé global (vraie
+protection DoS). 5 min de config. (Le garde-fou code ci-dessus reste utile en
+complément, ou pourra être retiré une fois la règle WAF en place.)
 
 ## Contexte
 `/invitation?ref=<CODE>` est PUBLIQUE et résout, via `service_role`, prénom + avatar + **email
