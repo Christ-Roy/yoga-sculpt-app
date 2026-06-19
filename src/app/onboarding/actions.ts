@@ -4,6 +4,7 @@ import { z } from "zod";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getCurrentUser } from "@/lib/auth";
 import { ONBOARDING_STEPS } from "@/lib/onboarding";
 import { logEvent } from "@/lib/events";
 import { getClientIpFromHeaders } from "@/lib/anti-abuse";
@@ -49,9 +50,7 @@ export async function saveOnboarding(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser(supabase);
 
   if (!user) {
     return { ok: false, error: "Session expirée. Reconnectez-vous." };
