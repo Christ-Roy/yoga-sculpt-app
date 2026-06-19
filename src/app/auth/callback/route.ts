@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
 import { logEvent } from "@/lib/events";
+import { safeInternalRedirect } from "@/lib/auth-redirect";
 
 /**
  * OAuth / magic-link callback.
@@ -121,10 +122,10 @@ export async function GET(request: Request) {
       }
     }
 
-    // A safe explicit redirectTo (relative path) takes precedence when present.
-    if (redirectTo && redirectTo.startsWith("/")) {
-      destination = redirectTo;
-    }
+    // A safe explicit redirectTo takes precedence when present. `redirectTo` is
+    // client-controlled → on le passe par `safeInternalRedirect` (rejette
+    // `//evil.com` / `/\evil.com` : open-redirect protocol-relative).
+    destination = safeInternalRedirect(redirectTo, destination);
 
     return NextResponse.redirect(new URL(destination, origin));
   } catch {

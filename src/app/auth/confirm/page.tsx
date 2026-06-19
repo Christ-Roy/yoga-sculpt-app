@@ -1,5 +1,6 @@
 import { Logo } from "@/components/Logo";
 import { ConfirmClient } from "./ConfirmClient";
+import { safeInternalRedirect } from "@/lib/auth-redirect";
 
 export const metadata = { title: "Connexion — Yoga Sculpt" };
 
@@ -31,8 +32,10 @@ export default async function ConfirmPage({
   const sp = await searchParams;
   const tokenHash = sp.token_hash ?? "";
   const type = sp.type ?? "magiclink";
-  const redirectTo =
-    sp.redirectTo && sp.redirectTo.startsWith("/") ? sp.redirectTo : "/espace";
+  // `redirectTo` est client-contrôlé (query param) : on le valide en chemin
+  // interne SÛR — rejette `//evil.com` / `/\evil.com` (open-redirect
+  // protocol-relative, ensuite passé à `window.location.assign` côté client).
+  const redirectTo = safeInternalRedirect(sp.redirectTo, "/espace");
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-bg px-5 py-10">
