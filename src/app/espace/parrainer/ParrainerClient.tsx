@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ParrainageCard } from "@/components/ParrainageCard";
-import { InviteAmiForm } from "@/components/InviteAmiForm";
+import { ShareInvitation } from "@/components/ShareInvitation";
 import { Toast, type ToastVariant } from "@/components/Toast";
 
 /**
@@ -141,22 +140,24 @@ export function ParrainerClient() {
 
   return (
     <div className="flex flex-col gap-6">
-      <ParrainageCard lienParrainage={data.lienParrainage} code={data.code} />
-
-      {/* Inviter par e-mail */}
+      {/* Partager l'invitation — partage natif (mobile) EN PREMIER, puis copie,
+          puis e-mail (ShareInvitation gère déjà cet ordre + le lien visible).
+          ParrainageCard retiré : il dupliquait le lien + copier AVANT le natif. */}
       <section
         className="rounded-[4px] border border-border bg-surface/60 p-6"
-        aria-labelledby="inviter-title"
+        aria-labelledby="partager-title"
       >
-        <h2 id="inviter-title" className="font-display text-xl text-text">
-          Inviter par e-mail
+        <h2 id="partager-title" className="font-display text-xl text-text">
+          Inviter un ami
         </h2>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Nous enverrons à votre ami une invitation avec votre lien.
+        <p className="mt-2 mb-4 text-sm leading-relaxed text-text-secondary">
+          Sur mobile, partagez directement via WhatsApp, SMS ou Instagram. Sur
+          ordinateur, envoyez l&apos;invitation par e-mail.
         </p>
-        <div className="mt-4">
-          <InviteAmiForm onInvite={onInvite} />
-        </div>
+        <ShareInvitation
+          lienParrainage={data.lienParrainage}
+          onInvite={onInvite}
+        />
       </section>
 
       {/* Liste des filleuls */}

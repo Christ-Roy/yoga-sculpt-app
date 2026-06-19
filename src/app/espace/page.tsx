@@ -1,20 +1,47 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth";
 import { ProfileCard } from "./ProfileCard";
 import { onboardingLabel } from "@/lib/onboarding";
-import type { Ticket, TicketType } from "@/lib/db-types";
+import type { Booking } from "@/lib/db-types";
+import { calculerSolde, type LigneSolde } from "@/components/espace/solde";
+import { DashboardGrid } from "@/components/espace/DashboardGrid";
+import {
+  SeancesAVenirWidget,
+  type SeanceWidget,
+} from "@/components/espace/SeancesAVenirWidget";
+import { TicketsWidget } from "@/components/espace/TicketsWidget";
+import { ReserverWidget } from "@/components/espace/ReserverWidget";
+import { ParrainageWidget } from "@/components/espace/ParrainageWidget";
+import { WelcomeTicketBanner } from "@/components/espace/WelcomeTicketBanner";
+import { resoudreLieuxParEvent } from "@/lib/booking-lieu";
+import { maxParrainagesCredites } from "@/lib/referral";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
 };
 
+/**
+ * Tableau de bord de l'espace client — home à WIDGETS.
+ *
+ * Server Component : auth + redirections métier (onboarding), puis lecture
+ * RLS-scopée des données affichées (profil, onboarding, solde de tickets, séances
+ * confirmées à venir). Les widgets eux-mêmes vivent dans `src/components/espace/*`.
+ *
+ * Le parrainage est le SEUL widget qui charge sa donnée côté navigateur
+ * (`/api/parrainage`) : le fetch SSR worker→worker est peu fiable sur l'edge
+ * Cloudflare (cf. note `ParrainerPage`). Il dégrade proprement.
+ *
+ * Lieu des cours = LE VRAI lieu de l'event Google (champ « Lieu » saisi par
+ * Alice, qui peut varier été/hiver). On le RELIT depuis Google par
+ * `google_event_id` (cf. `resoudreLieuxParEvent`) — plus de constante en dur. Si
+ * Google est indisponible ou le lieu non saisi, l'UI affiche « Lieu à confirmer ».
+ */
+
 export default async function EspacePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser(supabase);
 
   if (!user) {
     redirect("/login");
@@ -41,37 +68,79 @@ export default async function EspacePage() {
     .maybeSingle();
 
   const email = profile?.email ?? user.email ?? "";
-
-  // Solde de tickets (RLS user-scopée) — affiché en aperçu sur l'espace.
   const nowIso = new Date().toISOString();
-  const { data: tickets } = await supabase
+
+  // ── Solde de tickets (RLS user-scopée). ────────────────────────────────────
+  // On lit aussi `source` pour repérer le ticket de bienvenue encore disponible
+  // (« 1ère séance offerte ») et afficher l'encart d'incitation à la 1re résa.
+  const { data: tickets, error: ticketsErr } = await supabase
     .from("tickets")
-    .select("type, quantite_restante, expires_at")
+    .select("type, quantite_restante, expires_at, source")
     .gt("quantite_restante", 0)
     .or(`expires_at.is.null,expires_at.gt.${nowIso}`);
+  const solde = calculerSolde((tickets ?? []) as LigneSolde[]);
 
-  const solde = { collectif: 0, particulier: 0 };
-  for (const t of (tickets ?? []) as Pick<
-    Ticket,
-    "type" | "quantite_restante"
-  >[]) {
-    const type = t.type as TicketType;
-    if (type === "collectif" || type === "particulier") {
-      solde[type] += t.quantite_restante;
-    }
-  }
-  const totalTickets = solde.collectif + solde.particulier;
+  // Bannière parrainage : affichée tant qu'il reste des séances offertes à
+  // gagner (le parrain est crédité 1 ticket/filleul, plafond = celui appliqué au
+  // serveur via maxParrainagesCredites — plus de magie « 3 » dupliquée ici).
+  const { count: filleulsCredites } = await supabase
+    .from("referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("parrain_user_id", user.id)
+    .eq("ticket_credite", true);
+  const resteSeancesAGagner =
+    (filleulsCredites ?? 0) < maxParrainagesCredites();
+
+  // ── Séances confirmées à venir (RLS user-scopée). ──────────────────────────
+  const { data: bookingRows } = await supabase
+    .from("bookings")
+    .select("id, type, starts_at, ends_at, google_event_id")
+    .eq("status", "confirmed")
+    .gte("starts_at", nowIso)
+    .order("starts_at", { ascending: true });
+
+  const bookings = (bookingRows ?? []) as Pick<
+    Booking,
+    "id" | "type" | "starts_at" | "ends_at" | "google_event_id"
+  >[];
+
+  // Lieu RÉEL des séances : relu depuis Google par `google_event_id` (UN seul
+  // listEvents). Google KO / lieu non saisi → `undefined` → « Lieu à confirmer ».
+  const lieuxParEvent = await resoudreLieuxParEvent(bookings);
+
+  const seances: SeanceWidget[] = bookings.map((b) => ({
+    id: b.id,
+    type: b.type,
+    starts_at: b.starts_at,
+    ends_at: b.ends_at,
+    lieu: lieuxParEvent.get(b.google_event_id),
+  }));
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:py-10">
-        <div className="mb-8 animate-fade-in-up">
-          <p className="text-sm text-text-secondary">Bienvenue</p>
-          <h1 className="font-display text-3xl text-text">
-            {profile?.full_name || "Votre espace"}
-          </h1>
+    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:py-10">
+      <div className="mb-8 animate-fade-in-up">
+        <p className="text-sm text-text-secondary">Bienvenue</p>
+        <h1 className="font-display text-3xl text-text">
+          {profile?.full_name || "Votre espace"}
+        </h1>
+      </div>
+
+      {resteSeancesAGagner && <WelcomeTicketBanner />}
+
+      <DashboardGrid>
+        {/* Séances à venir — widget « héros », plus large sur grand écran. */}
+        <div className="md:col-span-2 xl:col-span-2">
+          <SeancesAVenirWidget seancesInitiales={seances} />
         </div>
 
-        <div className="flex flex-col gap-6">
+        <TicketsWidget solde={solde} error={Boolean(ticketsErr)} />
+
+        <ReserverWidget />
+
+        <ParrainageWidget />
+
+        {/* Profil — la carte existante (édition inline), élargie sur 2 colonnes. */}
+        <div className="md:col-span-2 xl:col-span-2">
           <ProfileCard
             email={email}
             fullName={profile?.full_name ?? null}
@@ -79,53 +148,8 @@ export default async function EspacePage() {
             goal={onboardingLabel("goal", onboarding?.goal)}
             level={onboardingLabel("level", onboarding?.level)}
           />
-
-          {/* Réserver une séance — renvoie vers le calendrier maison. */}
-          <section className="rounded-[4px] border border-border bg-surface/60 p-6">
-            <h2 className="font-display text-xl text-text">
-              Réserver une séance
-            </h2>
-            <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-              Choisissez un créneau parmi les dates proposées par Alice, et
-              gérez vos réservations à venir.
-            </p>
-
-            <p className="mt-4 text-sm text-text">
-              {totalTickets > 0 ? (
-                <>
-                  <span className="font-semibold text-accent">
-                    {solde.collectif}
-                  </span>{" "}
-                  ticket{solde.collectif > 1 ? "s" : ""} collectif
-                  <span className="mx-2 text-text-secondary">·</span>
-                  <span className="font-semibold text-accent">
-                    {solde.particulier}
-                  </span>{" "}
-                  particulier
-                </>
-              ) : (
-                <span className="text-text-secondary">
-                  Vous n&apos;avez pas encore de ticket.
-                </span>
-              )}
-            </p>
-
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/espace/reserver"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] bg-accent px-5 py-2.5 text-sm font-medium text-[#0e0e0e] transition-colors hover:bg-accent-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                Voir les créneaux
-              </Link>
-              <Link
-                href="/espace/reservations"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-[4px] border border-border bg-surface px-5 py-2.5 text-sm font-medium text-text transition-colors hover:border-accent/60 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                Mes réservations
-              </Link>
-            </div>
-          </section>
         </div>
+      </DashboardGrid>
     </div>
   );
 }

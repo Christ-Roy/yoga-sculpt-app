@@ -134,6 +134,95 @@ describe("POST /api/checkout", () => {
     const res = asMockResponse(await POST(makeReq({ formule: "collectif" })));
     expect(res.status).toBe(502);
   });
+
+  it("renvoie 400 sur un corps JSON invalide", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    const badReq = {
+      json: async () => {
+        throw new SyntaxError("bad json");
+      },
+      headers: { get: () => null },
+    } as unknown as Request;
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(await POST(badReq));
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ANTI-TAMPERING : un priceId explicite n'est accepté QUE s'il matche une formule connue", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_CARTE10", "price_carte10_real");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://checkout.stripe.com/c/ok", id: "cs_1" }),
+    });
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(
+      await POST(makeReq({ priceId: "price_carte10_real" })),
+    );
+    expect(res.status).toBe(200);
+    // On a bien utilisé le price RÉSOLU par l'env (pas une valeur arbitraire) +
+    // la quantité dérivée SERVEUR (carte10 → 10 séances), pas par le client.
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const bodyStr = (init.body as URLSearchParams).toString();
+    expect(bodyStr).toContain("line_items%5B0%5D%5Bprice%5D=price_carte10_real");
+    expect(bodyStr).toContain("metadata%5Bquantite%5D=10");
+    expect(bodyStr).toContain("metadata%5Btype%5D=collectif");
+  });
+
+  it("ANTI-PRICE-À-0€ : un priceId arbitraire (non connu) → 400, jamais d'appel Stripe", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_COLLECTIF", "price_collectif_123");
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(
+      await POST(makeReq({ priceId: "price_gratuit_pirate" })),
+    );
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 502 si l'appel réseau à Stripe jette (service indisponible)", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_COLLECTIF", "price_collectif_123");
+    fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(await POST(makeReq({ formule: "collectif" })));
+    expect(res.status).toBe(502);
+  });
+
+  it("renvoie 502 si Stripe répond 200 mais sans url de session", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_COLLECTIF", "price_collectif_123");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "cs_no_url" }), // pas de `url`
+    });
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(await POST(makeReq({ formule: "collectif" })));
+    expect(res.status).toBe(502);
+  });
+
+  it("reconstruit l'origin depuis x-forwarded-host quand l'header origin est absent", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_PRICE_COLLECTIF", "price_collectif_123");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://checkout.stripe.com/c/ok", id: "cs_2" }),
+    });
+    const { POST } = await import("@/app/api/checkout/route");
+    const res = asMockResponse(
+      await POST(
+        makeReq(
+          { formule: "collectif" },
+          { "x-forwarded-host": "app.yoga-sculpt.fr", "x-forwarded-proto": "https" },
+        ),
+      ),
+    );
+    expect(res.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const bodyStr = decodeURIComponent((init.body as URLSearchParams).toString());
+    expect(bodyStr).toContain("success_url=https://app.yoga-sculpt.fr/espace/reserver");
+  });
 });
 
 describe("GET /api/checkout", () => {

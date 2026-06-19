@@ -182,6 +182,97 @@ describe("POST /api/webhooks/stripe", () => {
     expect(res.status).toBe(200);
     expect(serviceMock.calls.find((c) => c.op === "upsert")).toBeUndefined();
   });
+
+  it("400 sur un payload JSON invalide (signature OK mais corps non-JSON)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = "ceci-n-est-pas-du-json";
+    const sig = await signStripe(body, now);
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(400);
+    expect(serviceMock.calls.find((c) => c.op === "upsert")).toBeUndefined();
+  });
+
+  it("ACK 200 sans créditer quand metadata.user_id est absent (rien d'exploitable)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // payment_status paid mais AUCUNE metadata → crediterTickets sort sans erreur.
+    const body = JSON.stringify({
+      id: "evt_4",
+      type: "checkout.session.completed",
+      data: {
+        object: { id: "cs_nometa", payment_status: "paid", metadata: {} },
+      },
+    });
+    const sig = await signStripe(body, now);
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    // ACK 200 : rejouer n'aiderait pas (la session est inexploitable).
+    expect(res.status).toBe(200);
+    expect(serviceMock.calls.find((c) => c.op === "upsert")).toBeUndefined();
+  });
+
+  it("ACK 200 sans créditer quand quantite est ≤ 0 ou non numérique", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_5",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_badqty",
+          payment_status: "paid",
+          metadata: { user_id: "user-1", type: "collectif", quantite: "0" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    expect(serviceMock.calls.find((c) => c.op === "upsert")).toBeUndefined();
+  });
+
+  it("500 si l'écriture DB échoue → Stripe re-tentera (l'upsert reste idempotent)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = completedEvent("cs_dberr");
+    const sig = await signStripe(body, now);
+    // L'upsert tickets renvoie une erreur DB.
+    serviceMock.queueResult("tickets", "upsert", {
+      data: null,
+      error: { message: "deadlock detected" },
+    });
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(500);
+  });
+
+  it("accepte le fallback client_reference_id quand metadata.user_id est absent", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_6",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_fallback",
+          client_reference_id: "user-fallback",
+          payment_status: "paid",
+          metadata: { type: "collectif", quantite: "5" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    const upsert = serviceMock.calls.find(
+      (c) => c.table === "tickets" && c.op === "upsert",
+    );
+    expect(upsert?.payload).toMatchObject({
+      user_id: "user-fallback",
+      type: "collectif",
+      quantite_initiale: 5,
+    });
+  });
 });
 
 describe("GET /api/webhooks/stripe", () => {

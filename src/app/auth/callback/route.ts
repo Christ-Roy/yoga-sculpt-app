@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
+import { logEvent } from "@/lib/events";
+import { safeInternalRedirect } from "@/lib/auth-redirect";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("auth/callback");
 
 /**
  * OAuth / magic-link callback.
@@ -94,7 +99,7 @@ export async function GET(request: Request) {
         const cookieStore = await cookies();
         const refCode = cookieStore.get("ys_ref")?.value;
         if (refCode) {
-          await completerReferral(service, {
+          const result = await completerReferral(service, {
             code: refCode,
             filleulUserId: user.id,
             filleulEmail: user.email ?? "",
@@ -103,17 +108,30 @@ export async function GET(request: Request) {
             // /completer le fournira et complétera si besoin, idempotent).
             fingerprint: null,
           });
+          // On ne consomme plus le cookie httpOnly : le client (Fingerprint
+          // collector) a besoin du jumeau `ys_ref_pub` pour rejouer /completer
+          // AVEC le fingerprint. `ys_ref` expirera seul (maxAge ~30 min).
+          // Tracking best-effort (ne casse jamais l'auth) : crédité vs bloqué.
+          void logEvent(
+            user.id,
+            result.credited ? "referral_credited" : "referral_blocked",
+            { code: refCode },
+            { service },
+          );
         }
       } catch (referralErr) {
         // Le parrainage est secondaire : on ne casse pas la connexion pour ça.
-        console.error("[auth/callback] Parrainage best-effort échoué :", referralErr);
+        log.error("Parrainage best-effort échoué", {
+          user_id: user.id,
+          err: serializeError(referralErr),
+        });
       }
     }
 
-    // A safe explicit redirectTo (relative path) takes precedence when present.
-    if (redirectTo && redirectTo.startsWith("/")) {
-      destination = redirectTo;
-    }
+    // A safe explicit redirectTo takes precedence when present. `redirectTo` is
+    // client-controlled → on le passe par `safeInternalRedirect` (rejette
+    // `//evil.com` / `/\evil.com` : open-redirect protocol-relative).
+    destination = safeInternalRedirect(redirectTo, destination);
 
     return NextResponse.redirect(new URL(destination, origin));
   } catch {

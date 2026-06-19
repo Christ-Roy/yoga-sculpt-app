@@ -12,6 +12,22 @@ vi.mock("@/lib/reminders", () => ({
   scanAndSendReminders: () => scanMock(),
 }));
 
+// Passes annexes du même tick : mockées pour isoler la garde d'auth + le routage.
+const attendanceMock = vi.fn(async () => ({ marquees: 0, erreurs: 0 }));
+vi.mock("@/lib/attendance", () => ({
+  markPastBookingsAttended: () => attendanceMock(),
+}));
+
+const relancesMock = vi.fn(async () => ({
+  jamaisReserve: 0,
+  dormant: 0,
+  ticketDormant: 0,
+  erreurs: 0,
+}));
+vi.mock("@/lib/relance", () => ({
+  scanAndSendRelances: () => relancesMock(),
+}));
+
 function req(opts: { header?: string; query?: string } = {}) {
   const url = opts.query
     ? `https://app.yoga-sculpt.fr/api/cron?secret=${opts.query}`
@@ -24,6 +40,8 @@ function req(opts: { header?: string; query?: string } = {}) {
 describe("GET /api/cron", () => {
   beforeEach(() => {
     scanMock.mockReset();
+    attendanceMock.mockClear();
+    relancesMock.mockClear();
     vi.resetModules();
   });
   afterEach(() => {
@@ -83,5 +101,80 @@ describe("GET /api/cron", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.ok).toBe(false);
+  });
+
+  it("une passe attendance qui throw n'échoue PAS le cron (best-effort, erreurs signalées)", async () => {
+    process.env.CRON_SECRET = "abc";
+    scanMock.mockResolvedValue({ j1: 0, h2: 0 });
+    attendanceMock.mockRejectedValueOnce(new Error("attendance KO"));
+    const { GET } = await import("@/app/api/cron/route");
+    const res = await GET(req({ header: "abc" }));
+    // Les rappels (passe 1) ont réussi → 200 ; attendance remonte erreurs:1.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.attendance.erreurs).toBe(1);
+  });
+});
+
+describe("GET /api/cron — passe relance des inactifs", () => {
+  beforeEach(() => {
+    scanMock.mockReset();
+    scanMock.mockResolvedValue({ j1Envoyes: 0, h2Envoyes: 0, erreurs: 0 });
+    attendanceMock.mockClear();
+    relancesMock.mockClear();
+    relancesMock.mockResolvedValue({
+      jamaisReserve: 0,
+      dormant: 0,
+      ticketDormant: 0,
+      erreurs: 0,
+    });
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.CRON_SECRET;
+    vi.restoreAllMocks();
+  });
+
+  it("déclenche la passe relance et remonte son bilan dans la réponse", async () => {
+    process.env.CRON_SECRET = "abc";
+    relancesMock.mockResolvedValue({
+      jamaisReserve: 2,
+      dormant: 1,
+      ticketDormant: 3,
+      erreurs: 0,
+    });
+    const { GET } = await import("@/app/api/cron/route");
+    const res = await GET(req({ header: "abc" }));
+    expect(res.status).toBe(200);
+    expect(relancesMock).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.relances).toEqual({
+      jamaisReserve: 2,
+      dormant: 1,
+      ticketDormant: 3,
+      erreurs: 0,
+    });
+  });
+
+  it("une passe relance qui throw n'échoue PAS le cron (best-effort)", async () => {
+    process.env.CRON_SECRET = "abc";
+    relancesMock.mockRejectedValue(new Error("relance KO"));
+    const { GET } = await import("@/app/api/cron/route");
+    const res = await GET(req({ header: "abc" }));
+    // Les rappels (passe 1) ont réussi → 200, relances avec erreur signalée.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.relances.erreurs).toBe(1);
+  });
+
+  it("ne déclenche PAS la passe relance sans secret valide", async () => {
+    process.env.CRON_SECRET = "abc";
+    const { GET } = await import("@/app/api/cron/route");
+    const res = await GET(req({ header: "faux-secret-meme-longueur-xx" }));
+    expect(res.status).toBe(401);
+    expect(relancesMock).not.toHaveBeenCalled();
   });
 });

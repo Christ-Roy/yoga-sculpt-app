@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getEvent, patchEvent } from "@/lib/google-calendar";
+import { getEvent, patchEvent, deleteEvent } from "@/lib/google-calendar";
+import { logEvent } from "@/lib/events";
+import { notifierAlice } from "@/lib/notify-alice";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
   retirerAttendee,
   dansMoinsDe,
   DELAI_ANNULATION_HEURES,
 } from "@/lib/reservation";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("annuler");
 
 /**
  * POST /api/annuler — annule une réservation confirmée.
@@ -87,7 +92,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (loadErr) {
-    console.error("[annuler] Lecture du booking échouée :", loadErr.message);
+    log.error("Lecture du booking échouée", {
+      booking_id: bookingId,
+      user_id: user.id,
+      db: loadErr.message,
+    });
     return NextResponse.json(
       { error: "Impossible de charger la réservation." },
       { status: 500 },
@@ -145,7 +154,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (cancelErr) {
-    console.error("[annuler] Update booking échoué :", cancelErr.message);
+    log.error("Update booking échoué", {
+      booking_id: booking.id,
+      user_id: user.id,
+      db: cancelErr.message,
+    });
     return NextResponse.json(
       { error: "Annulation impossible." },
       { status: 500 },
@@ -159,6 +172,7 @@ export async function POST(request: Request) {
   // ── 5) Recrédite le ticket lié (best-effort). ───────────────────────────────
   // On lit la quantité actuelle puis +1, sous le plafond quantite_initiale (le
   // check DB `quantite_restante <= quantite_initiale` rejetterait un dépassement).
+  let ticketRecredite = false;
   if (booking.ticket_id) {
     const { data: ticketRow, error: ticketLoadErr } = await service
       .from("tickets")
@@ -167,10 +181,11 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (ticketLoadErr) {
-      console.error(
-        "[annuler] Lecture ticket pour recrédit échouée :",
-        ticketLoadErr.message,
-      );
+      log.error("Lecture ticket pour recrédit échouée", {
+        booking_id: booking.id,
+        ticket_id: booking.ticket_id,
+        db: ticketLoadErr.message,
+      });
     } else if (ticketRow) {
       const ticket = ticketRow as Ticket;
       const recredite = Math.min(
@@ -182,28 +197,80 @@ export async function POST(request: Request) {
         .update({ quantite_restante: recredite })
         .eq("id", ticket.id);
       if (recreditErr) {
-        console.error("[annuler] Recrédit ticket échoué :", recreditErr.message);
+        log.error("Recrédit ticket échoué", {
+          booking_id: booking.id,
+          ticket_id: ticket.id,
+          db: recreditErr.message,
+        });
+      } else {
+        ticketRecredite = true;
       }
     }
   }
 
-  // ── 6) Retire le user des attendees de l'event Google (best-effort). ────────
-  // Le créneau est un event partagé d'Alice : on ne le SUPPRIME pas (d'autres
-  // users peuvent y être inscrits), on retire juste le user de la liste.
-  if (user.email && booking.google_event_id) {
+  // ── 6) Met à jour l'event Google selon le type (best-effort). ───────────────
+  // PARTICULIER : l'event a été CRÉÉ pour ce client (créneau libre, dédié) → on
+  //   le SUPPRIME de l'agenda d'Alice (libère le créneau, qui pourra être
+  //   re-réservé : l'index unique sur starts_at ne s'applique qu'aux confirmed).
+  // COLLECTIF : l'event est partagé d'Alice (d'autres users peuvent y être
+  //   inscrits) → on ne supprime PAS, on retire juste le user des attendees.
+  // Le placeholder « pending-… » (event Google jamais créé) est ignoré.
+  const aUnEventGoogle =
+    Boolean(booking.google_event_id) &&
+    !booking.google_event_id.startsWith("pending-");
+  if (aUnEventGoogle) {
     try {
-      const event = await getEvent(booking.google_event_id);
-      const attendees = retirerAttendee(event.attendees, user.email);
-      await patchEvent(booking.google_event_id, { attendees });
+      if (booking.type === "particulier") {
+        await deleteEvent(booking.google_event_id);
+      } else if (user.email) {
+        const event = await getEvent(booking.google_event_id);
+        const attendees = retirerAttendee(event.attendees, user.email);
+        await patchEvent(booking.google_event_id, { attendees });
+      }
     } catch (err) {
       // L'annulation métier (étape 4) a réussi : on n'échoue pas la requête
       // pour un effet de bord Google. On log pour réconciliation manuelle.
-      console.error(
-        "[annuler] Retrait de l'attendee Google échoué (annulation maintenue) :",
-        err,
-      );
+      log.error("MAJ event Google échouée (annulation maintenue)", {
+        booking_id: booking.id,
+        type: booking.type,
+        err: serializeError(err),
+      });
     }
   }
+
+  // ── 6 bis) Notifie Alice de l'annulation (best-effort). ─────────────────────
+  await notifierAlice("annulation", {
+    type: booking.type,
+    startsAt: booking.starts_at,
+    endsAt: booking.ends_at,
+    clientNom:
+      (user.user_metadata?.full_name as string | undefined) ??
+      (user.user_metadata?.name as string | undefined) ??
+      user.email ??
+      null,
+    clientEmail: user.email ?? null,
+    clientTel:
+      user.phone ||
+      (user.user_metadata?.phone as string | undefined) ||
+      (user.user_metadata?.telephone as string | undefined) ||
+      null,
+  });
+
+  // ── Tracking : booking_cancelled. ───────────────────────────────────────────
+  // best-effort (l'annulation — métier — est déjà committée, étape 4). On
+  // réutilise le client service_role déjà ouvert.
+  await logEvent(
+    user.id,
+    "booking_cancelled",
+    {
+      booking_id: booking.id,
+      type: booking.type,
+      creneau_id: booking.google_calendar_creneau_id,
+      starts_at: booking.starts_at,
+      recredite: ticketRecredite,
+    },
+    { source: "annuler", service },
+  );
 
   return NextResponse.json({ ok: true });
 }

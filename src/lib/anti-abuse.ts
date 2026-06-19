@@ -89,10 +89,21 @@ const DISPOSABLE_EMAIL_DOMAINS = new Set<string>([
  * Renvoie `null` si aucune IP exploitable (on ne bloque pas faute d'IP).
  */
 export function getClientIp(request: Request): string | null {
-  const cf = request.headers.get("CF-Connecting-IP");
+  return getClientIpFromHeaders(request.headers);
+}
+
+/**
+ * Variante prenant directement un porteur de headers (`Headers`, ou l'objet
+ * renvoyé par `next/headers#headers()` dans une Server Action — qui n'a pas de
+ * `Request` à portée de main). Même logique que `getClientIp`.
+ */
+export function getClientIpFromHeaders(
+  headers: { get(name: string): string | null },
+): string | null {
+  const cf = headers.get("CF-Connecting-IP");
   if (cf && cf.trim().length > 0) return cf.trim();
 
-  const xff = request.headers.get("x-forwarded-for");
+  const xff = headers.get("x-forwarded-for");
   if (xff) {
     // x-forwarded-for = "client, proxy1, proxy2" → on prend la 1re (le client).
     const first = xff.split(",")[0]?.trim();
@@ -181,18 +192,21 @@ export async function canCreditReferral(
   // null ne doit jamais matcher (sinon tous les comptes sans signal seraient
   // « doublons » entre eux → faux positifs massifs).
   if (ip) {
+    // R2 — limite à 2 comptes par IP : une même maison (colocs / famille,
+    // même IP publique) doit pouvoir se parrainer. On REFUSE seulement à partir
+    // du 3e compte, soit quand ≥ 2 AUTRES comptes partagent déjà cette IP.
     const { data: ipDup, error: ipErr } = await service
       .from("account_signals")
       .select("user_id")
       .eq("ip_creation", ip)
       .neq("user_id", filleulUserId)
-      .limit(1);
+      .limit(2);
     if (ipErr) {
       console.error("[anti-abuse] Lecture account_signals IP (R2) échouée :", ipErr.message);
       return false;
     }
-    if (ipDup && ipDup.length > 0) {
-      return false; // R2 : même IP qu'un autre compte → suspect.
+    if (ipDup && ipDup.length >= 2) {
+      return false; // R2 : 3e compte (ou +) sur la même IP → suspect.
     }
   }
 
@@ -216,5 +230,105 @@ export async function canCreditReferral(
   }
 
   // Toutes les règles passent → crédit autorisé.
+  return true;
+}
+
+/**
+ * Vrai s'il existe un AUTRE compte (≠ `userId`) partageant la même IP de
+ * création OU le même fingerprint d'appareil — signe d'un multi-comptes.
+ *
+ * Mutualise R2 (IP) + R3 (fingerprint) de `canCreditReferral` pour les réutiliser
+ * dans l'anti-abus du ticket de bienvenue (même menace : créer 10 faux comptes
+ * pour multiplier les essais gratuits).
+ *
+ * Côté SÛR en cas d'erreur DB : on renvoie `true` (= « doublon présumé » → refus
+ * du crédit côté appelant) plutôt que de risquer un abus.
+ * Un signal `null` (IP ou fp absent) n'est jamais comparé (pas de faux positif).
+ */
+async function hasSharedSignals(
+  service: SupabaseClient,
+  params: { userId: string; ip: string | null; fingerprint: string | null },
+): Promise<boolean> {
+  const { userId, ip, fingerprint } = params;
+
+  if (ip) {
+    const { data: ipDup, error: ipErr } = await service
+      .from("account_signals")
+      .select("user_id")
+      .eq("ip_creation", ip)
+      .neq("user_id", userId)
+      .limit(1);
+    if (ipErr) {
+      console.error("[anti-abuse] Lecture account_signals IP échouée :", ipErr.message);
+      return true; // côté sûr : on présume le doublon → l'appelant ne crédite pas.
+    }
+    if (ipDup && ipDup.length > 0) return true;
+  }
+
+  if (fingerprint) {
+    const { data: fpDup, error: fpErr } = await service
+      .from("account_signals")
+      .select("user_id")
+      .eq("device_fingerprint", fingerprint)
+      .neq("user_id", userId)
+      .limit(1);
+    if (fpErr) {
+      console.error(
+        "[anti-abuse] Lecture account_signals fingerprint échouée :",
+        fpErr.message,
+      );
+      return true;
+    }
+    if (fpDup && fpDup.length > 0) return true;
+  }
+
+  return false;
+}
+
+/** Paramètres de la décision d'octroi du ticket de bienvenue. */
+export interface CanGrantWelcomeParams {
+  /** Id du compte qui vient de compléter l'onboarding. */
+  userId: string;
+  /** E-mail du compte (pour le test « jetable »). */
+  email: string;
+  /** IP de création / d'onboarding (peut être null si non captée). */
+  ip: string | null;
+  /** Empreinte d'appareil hashée (peut être null en server action). */
+  fingerprint: string | null;
+}
+
+/**
+ * Décide si on PEUT octroyer le ticket de bienvenue (« 1ère séance offerte »).
+ *
+ * Mêmes signaux que le parrainage (e-mail jetable + IP/fingerprint partagés),
+ * SANS la règle R4 (propre au parrainage). L'idempotence stricte « 1 ticket
+ * bienvenue par compte » est garantie AILLEURS (flag profil
+ * `welcome_ticket_granted_at` + index unique partiel DB), pas ici : cette
+ * fonction ne se prononce QUE sur le risque d'abus multi-comptes.
+ *
+ *   (W1) E-mail jetable        — inscription opportuniste, pas un vrai prospect.
+ *   (W2) IP partagée           — un AUTRE compte créé depuis la même IP.
+ *   (W3) Fingerprint partagé   — un AUTRE compte avec la même empreinte.
+ *
+ * ÉCHEC SILENCIEUX : l'appelant ne crédite pas et ne révèle JAMAIS la raison
+ * (comme le parrainage). En cas d'erreur DB → côté sûr (refus).
+ *
+ * @param service client Supabase service_role (bypass RLS — on inspecte d'AUTRES
+ *                comptes que celui-ci, ce que la RLS interdirait).
+ */
+export async function canGrantWelcomeTicket(
+  service: SupabaseClient,
+  { userId, email, ip, fingerprint }: CanGrantWelcomeParams,
+): Promise<boolean> {
+  // ── W1 : e-mail jetable ────────────────────────────────────────────────────
+  if (isDisposableEmail(email)) {
+    return false;
+  }
+
+  // ── W2 & W3 : IP / fingerprint partagés avec un AUTRE compte ───────────────
+  if (await hasSharedSignals(service, { userId, ip, fingerprint })) {
+    return false;
+  }
+
   return true;
 }

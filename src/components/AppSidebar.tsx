@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CalendarPlus, Gift, Home, LogOut, Ticket } from "lucide-react";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
+import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
 import { Logo } from "@/components/Logo";
 import { signOut } from "@/app/login/actions";
 import {
@@ -32,7 +33,7 @@ const LIENS = [
 /**
  * Sidebar de l'espace client (charte NOIR & OR).
  *
- * - Header : wordmark "YOGA SCULPT".
+ * - Header : logo Yoga Sculpt (médaillon + wordmark ; médaillon seul replié).
  * - Contenu : liens vers les pages de l'espace, item actif souligné en OR.
  * - Footer : nom de l'utilisateur + bouton déconnexion.
  *
@@ -42,6 +43,24 @@ const LIENS = [
 export function AppSidebar({ userLabel }: { userLabel: string }) {
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
+
+  // Tickets de parrainage encore à gagner (PARRAINAGE_MAX - déjà gagnés).
+  // > 0 → pastille rouge animée sur "Parrainer" pour inciter à inviter.
+  const [ticketsAGagner, setTicketsAGagner] = useState(0);
+  useEffect(() => {
+    let annule = false;
+    fetch("/api/parrainage", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (annule || !d) return;
+        const restant = PARRAINAGE_MAX_DEFAUT - (d.ticketsGagnes ?? 0);
+        setTicketsAGagner(Math.max(0, restant));
+      })
+      .catch(() => {});
+    return () => {
+      annule = true;
+    };
+  }, []);
 
   const estActif = (href: string) =>
     href === "/espace" ? pathname === href : pathname.startsWith(href);
@@ -54,13 +73,15 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
           aria-label="Mon espace"
           className="flex items-center px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
-          <Logo className="text-lg group-data-[collapsible=icon]:hidden" />
-          {/* Monogramme compact quand la sidebar est repliée. */}
-          <span
-            aria-hidden
-            className="wordmark hidden text-lg text-accent group-data-[collapsible=icon]:inline"
-          >
-            YS
+          {/* Logo complet (médaillon + wordmark) quand la sidebar est dépliée.
+              Masquage porté par un <span> neutre : le Logo est un inline-flex qui
+              écraserait `hidden` s'il était posé dessus → doublon visible. */}
+          <span className="group-data-[collapsible=icon]:hidden">
+            <Logo title="Yoga Sculpt — espace" />
+          </span>
+          {/* Médaillon seul quand la sidebar est repliée (espace étroit). */}
+          <span className="hidden group-data-[collapsible=icon]:inline-flex">
+            <Logo title="Yoga Sculpt — espace réduit" showText={false} />
           </span>
         </Link>
       </SidebarHeader>
@@ -79,9 +100,28 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
                       isActive={estActif(lien.href)}
                       tooltip={lien.label}
                     >
-                      <Link href={lien.href}>
-                        <Icone />
+                      <Link href={lien.href} className="relative">
+                        <span className="relative">
+                          <Icone />
+                          {/* Pastille rouge animée : tickets de parrainage à gagner */}
+                          {lien.href === "/espace/parrainer" &&
+                            ticketsAGagner > 0 && (
+                              <span
+                                className="absolute -right-1 -top-1 flex h-2.5 w-2.5"
+                                aria-hidden="true"
+                              >
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+                              </span>
+                            )}
+                        </span>
                         <span>{lien.label}</span>
+                        {lien.href === "/espace/parrainer" &&
+                          ticketsAGagner > 0 && (
+                            <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[0.65rem] font-semibold text-white">
+                              {ticketsAGagner}
+                            </span>
+                          )}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

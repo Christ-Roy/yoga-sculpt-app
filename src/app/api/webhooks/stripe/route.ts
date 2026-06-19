@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { logEvent } from "@/lib/events";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("webhook:stripe");
 
 /**
  * Webhook Stripe — réception des événements de paiement.
@@ -42,6 +46,8 @@ interface StripeCheckoutSession {
   client_reference_id?: string | null;
   payment_intent?: string | null;
   payment_status?: string;
+  /** Montant total payé, en CENTIMES (devise mineure) — pour la LTV / le CA. */
+  amount_total?: number | null;
   metadata?: {
     user_id?: string;
     type?: string;
@@ -155,15 +161,12 @@ async function crediterTickets(session: StripeCheckoutSession): Promise<void> {
   // Garde-fous : sans ces données, on ne sait pas quoi créditer. On log et on
   // sort sans erreur (l'ACK 200 reste valable : rejouer n'aiderait pas).
   if (!userId || !type || Number.isNaN(quantite) || quantite <= 0) {
-    console.error(
-      "[webhook:stripe] Session sans données exploitables — crédit ignoré.",
-      {
-        sessionId: session.id,
-        userId,
-        type,
-        quantiteRaw: session.metadata?.quantite,
-      },
-    );
+    log.error("Session sans données exploitables — crédit ignoré", {
+      session_id: session.id,
+      user_id: userId,
+      type,
+      quantite_raw: session.metadata?.quantite,
+    });
     return;
   }
 
@@ -190,9 +193,43 @@ async function crediterTickets(session: StripeCheckoutSession): Promise<void> {
     throw new Error(`Insertion ticket échouée : ${error.message}`);
   }
 
-  console.info(
-    `[webhook:stripe] Tickets crédités — user=${userId} type=${type} ` +
-      `quantite=${quantite} session=${session.id}`,
+  log.info("Tickets crédités", {
+    user_id: userId,
+    type,
+    quantite,
+    session_id: session.id,
+  });
+
+  // ── Tracking : checkout_completed + ticket_acquired (acquisition: paid). ────
+  // best-effort (le crédit ticket — métier — a déjà réussi ; un log raté n'a pas
+  // à le faire échouer ni rejouer). On réutilise le client service_role déjà
+  // ouvert. montant en euros (amount_total Stripe = centimes) pour LTV/CA.
+  const montant =
+    typeof session.amount_total === "number" ? session.amount_total / 100 : null;
+
+  await logEvent(
+    userId,
+    "checkout_completed",
+    {
+      stripe_session_id: session.id,
+      type,
+      quantite,
+      nb_tickets: quantite,
+      montant,
+    },
+    { source: "webhook:stripe", service: supabase },
+  );
+
+  await logEvent(
+    userId,
+    "ticket_acquired",
+    {
+      type,
+      quantite,
+      acquisition_source: "paid",
+      stripe_session_id: session.id,
+    },
+    { source: "webhook:stripe", service: supabase },
   );
 }
 
@@ -202,9 +239,7 @@ export async function POST(request: Request) {
   // Sans secret configuré, on refuse de traiter : un webhook non vérifié est
   // une porte d'entrée non authentifiée. Fail-safe.
   if (!secret) {
-    console.error(
-      "[webhook:stripe] STRIPE_WEBHOOK_SECRET manquant — webhook rejeté.",
-    );
+    log.error("STRIPE_WEBHOOK_SECRET manquant — webhook rejeté");
     return NextResponse.json(
       { error: "Webhook non configuré." },
       { status: 500 },
@@ -218,9 +253,7 @@ export async function POST(request: Request) {
 
   const valid = await verifyStripeSignature(rawBody, signature, secret);
   if (!valid) {
-    console.warn(
-      "[webhook:stripe] Signature invalide ou expirée — requête rejetée (400).",
-    );
+    log.warn("Signature invalide ou expirée — requête rejetée (400)");
     return NextResponse.json({ error: "Signature invalide." }, { status: 400 });
   }
 
@@ -242,11 +275,10 @@ export async function POST(request: Request) {
       // On ne crédite que si Stripe confirme le paiement. (`payment_status` est
       // `paid` pour un paiement réussi en mode=payment.)
       if (session.payment_status && session.payment_status !== "paid") {
-        console.info(
-          `[webhook:stripe] checkout.session.completed non payé ` +
-            `(payment_status=${session.payment_status}) — ignoré. ` +
-            `session=${session.id}`,
-        );
+        log.info("checkout.session.completed non payé — ignoré", {
+          payment_status: session.payment_status,
+          session_id: session.id,
+        });
         break;
       }
 
@@ -254,7 +286,10 @@ export async function POST(request: Request) {
         await crediterTickets(session);
       } catch (err) {
         // Erreur DB : on répond 500 pour que Stripe re-tente (idempotent).
-        console.error("[webhook:stripe] Crédit des tickets échoué :", err);
+        log.error("Crédit des tickets échoué", {
+          session_id: session.id,
+          err: serializeError(err),
+        });
         return NextResponse.json(
           { error: "Traitement échoué, réessayer." },
           { status: 500 },
@@ -266,7 +301,7 @@ export async function POST(request: Request) {
     default:
       // Événement non géré : on ACK quand même (200) pour éviter que Stripe ne
       // re-tente en boucle. On log pour visibilité.
-      console.info(`[webhook:stripe] Événement non géré : ${event.type}`);
+      log.info("Événement non géré", { event_type: event.type });
       break;
   }
 

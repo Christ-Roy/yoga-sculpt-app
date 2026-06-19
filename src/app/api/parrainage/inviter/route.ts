@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getOrCreateCode, normaliserEmail } from "@/lib/referral";
 import { isDisposableEmail } from "@/lib/anti-abuse";
 import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
+import { logEvent } from "@/lib/events";
 
 /**
  * POST /api/parrainage/inviter — le membre connecté invite un filleul par e-mail.
@@ -146,6 +147,9 @@ export async function POST(request: Request) {
     },
   );
 
+  // Tracking : invitation enregistrée (best-effort, ne bloque jamais).
+  void logEvent(user.id, "referral_invited", { filleulEmail: email, code });
+
   return NextResponse.json({ ok: true, code });
 }
 
@@ -162,9 +166,12 @@ async function envoyerInvitation(params: {
   const apiKey = process.env.BREVO_API_KEY;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.yoga-sculpt.fr";
   // Expéditeur : variables dédiées au parrainage (pas de couplage avec un autre
-  // flux). Valeurs par défaut raisonnables si non configuré.
+  // flux). Fallback aligné sur l'expéditeur authentifié Brevo du reste de l'app
+  // (`notifications@yoga-sculpt.fr`, SPF/DKIM OK, cf src/lib/brevo.ts et
+  // .env.example). `contact@` n'est qu'une redirection Cloudflare Email Routing,
+  // pas un expéditeur Brevo validé → l'utiliser en fallback risquait spam/rejet.
   const senderEmail =
-    process.env.BREVO_INVITE_SENDER_EMAIL ?? "contact@yoga-sculpt.fr";
+    process.env.BREVO_INVITE_SENDER_EMAIL ?? "notifications@yoga-sculpt.fr";
   const senderName = process.env.BREVO_INVITE_SENDER_NAME ?? "Yoga Sculpt";
 
   if (!apiKey) {

@@ -22,6 +22,89 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreditReferral } from "@/lib/anti-abuse";
+import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
+import { sanitizeRefCode } from "@/lib/ref-code";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("referral");
+
+/**
+ * Résout le PRÉNOM du parrain à partir d'un code de parrainage — pour la landing
+ * d'invitation `/invitation?ref=<CODE>` (« {Prénom} vous a invité… »).
+ *
+ * Garde-fous (SÉCURITÉ / VIE PRIVÉE) :
+ *   - Le `code` est SANITISÉ (sanitizeRefCode) : format strict 8 chars de
+ *     l'alphabet non ambigu, MAJUSCULES. Tout code hors-norme → `null` (on ne
+ *     lance même pas la requête).
+ *   - SELECT BORNÉ à `full_name` UNIQUEMENT : on n'expose JAMAIS l'e-mail, le
+ *     téléphone, l'id ni aucune autre PII du parrain via cette route publique.
+ *   - On ne renvoie que le PREMIER token du nom (le prénom), pas le nom complet.
+ *   - Code inconnu, profil sans nom, ou erreur DB → `null` (la landing affiche
+ *     alors son titre de repli « Vous avez été invité(e)… »). Best-effort : ne
+ *     throw jamais (une page publique ne doit pas planter sur un lookup raté).
+ *
+ * @param service client `service_role` (bypass RLS) — la route est publique, la
+ *                table profiles est sous RLS ; on lit au nom du système, borné au
+ *                seul champ `full_name`.
+ * @param rawCode valeur brute du paramètre `?ref=` (non fiable).
+ * @returns le prénom du parrain, ou `null`.
+ */
+export async function prenomParrainParCode(
+  service: SupabaseClient,
+  rawCode: string | null | undefined,
+): Promise<string | null> {
+  const code = sanitizeRefCode(rawCode);
+  if (!code) return null;
+
+  try {
+    const { data, error } = await service
+      .from("profiles")
+      // ⚠️ Champ unique : full_name. Ne JAMAIS élargir ce select (pas d'email/tel).
+      .select("full_name")
+      .eq("referral_code", code)
+      .maybeSingle();
+
+    if (error) {
+      log.error("Résolution prénom parrain échouée", { db: error.message });
+      return null;
+    }
+
+    const fullName =
+      typeof data?.full_name === "string" ? data.full_name.trim() : "";
+    if (!fullName) return null;
+
+    // Premier token = prénom (on ne renvoie pas le nom de famille).
+    const prenom = fullName.split(/\s+/)[0] ?? "";
+    return prenom || null;
+  } catch (err) {
+    // Page PUBLIQUE : un lookup raté ne doit jamais la faire planter en 500.
+    log.error("Exception résolution prénom parrain", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Plafond EFFECTIF de parrainages crédités par parrain (anti-farming).
+ *
+ * Lit la surcharge d'environnement `REFERRAL_MAX_CREDITS` si elle est un entier
+ * positif valide, sinon retombe sur le défaut métier (`PARRAINAGE_MAX_DEFAUT`).
+ * Permet d'ajuster le plafond (durcir / desserrer) sans redéploiement de code.
+ *
+ * C'est la SEULE source de vérité du plafond appliqué au crédit (cf.
+ * `completerReferral`). Les écrans UI n'utilisent que le défaut comme repère.
+ */
+export function maxParrainagesCredites(): number {
+  const brut = process.env.REFERRAL_MAX_CREDITS;
+  if (brut !== undefined) {
+    const n = Number.parseInt(brut, 10);
+    // On n'accepte qu'un entier strictement positif ; toute valeur douteuse
+    // (vide, négative, non numérique) → on garde le défaut sûr.
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return PARRAINAGE_MAX_DEFAUT;
+}
 
 /**
  * Alphabet du code de parrainage : sans caractères ambigus (pas de 0/O, 1/I/L)
@@ -70,7 +153,7 @@ export async function getOrCreateCode(
     .maybeSingle();
 
   if (readErr) {
-    console.error("[referral] Lecture profile échouée :", readErr.message);
+    log.error("Lecture profile échouée", { user_id: userId, db: readErr.message });
     return null;
   }
   if (profile?.referral_code) {
@@ -104,10 +187,15 @@ export async function getOrCreateCode(
       // Collision de code (déjà pris par un autre profil) → on régénère.
       continue;
     }
-    console.error("[referral] Écriture referral_code échouée :", updErr.message);
+    log.error("Écriture referral_code échouée", {
+      user_id: userId,
+      db: updErr.message,
+    });
     return null;
   }
-  console.error("[referral] Impossible de générer un code unique après 5 essais.");
+  log.error("Impossible de générer un code unique après 5 essais", {
+    user_id: userId,
+  });
   return null;
 }
 
@@ -144,7 +232,10 @@ export async function enregistrerSignaux(
     .upsert(row, { onConflict: "user_id" });
 
   if (error) {
-    console.error("[referral] Upsert account_signals échoué :", error.message);
+    log.error("Upsert account_signals échoué", {
+      user_id: userId,
+      db: error.message,
+    });
   }
 }
 
@@ -162,11 +253,15 @@ async function crediterTicketParrain(
     type: "collectif",
     quantite_initiale: 1,
     quantite_restante: 1,
+    source: "referral", // traçabilité d'origine (cf migration 0009).
     // Pas de stripe_* : c'est un ticket offert (parrainage), pas un achat.
     // expires_at null = pas d'expiration imposée au cadeau.
   });
   if (error) {
-    console.error("[referral] Insert ticket parrainage échoué :", error.message);
+    log.error("Insert ticket parrainage échoué", {
+      parrain_user_id: parrainUserId,
+      db: error.message,
+    });
     return false;
   }
   return true;
@@ -216,7 +311,7 @@ export async function completerReferral(
     .maybeSingle();
 
   if (parrainErr) {
-    console.error("[referral] Résolution code parrain échouée :", parrainErr.message);
+    log.error("Résolution code parrain échouée", { db: parrainErr.message });
     return { credited: false };
   }
   if (!parrainProfile?.id) {
@@ -281,14 +376,44 @@ export async function completerReferral(
       .select("id")
       .single();
     if (createErr || !created) {
-      console.error(
-        "[referral] Création referral à la volée échouée :",
-        createErr?.message,
-      );
+      log.error("Création referral à la volée échouée", {
+        parrain_user_id: parrainUserId,
+        filleul_user_id: params.filleulUserId,
+        db: createErr?.message,
+      });
       return { credited: false };
     }
     referralId = created.id as string;
   }
+
+  // 5bis) PLAFOND (anti-farming) : un parrain est crédité au maximum
+  // `maxParrainagesCredites()` fois (1 ticket par filleul). Au-delà, on lie le
+  // filleul pour la traçabilité mais on ne crédite plus. Plafond configurable via
+  // `REFERRAL_MAX_CREDITS` (défaut métier 3). (count exact via head:true)
+  const plafond = maxParrainagesCredites();
+  const { count: dejaCredites, error: countErr } = await service
+    .from("referrals")
+    .select("id", { count: "exact", head: true })
+    .eq("parrain_user_id", parrainUserId)
+    .eq("ticket_credite", true);
+  if (countErr) {
+    log.error("Comptage plafond parrain échoué", {
+      parrain_user_id: parrainUserId,
+      db: countErr.message,
+    });
+    return { credited: false };
+  }
+  if ((dejaCredites ?? 0) >= plafond) {
+    // Plafond atteint : on ne crédite plus, mais le filleul reste rattaché.
+    return { credited: false };
+  }
+
+  // TODO(anti-abus): créditer après la 1ère séance HONORÉE du filleul (booking
+  // passé + bookings.attendance='attended') plutôt qu'à l'inscription (cf. todo
+  // 2026-06-19-qa-secu-parrainage-anti-abus-farmable, levier 1). C'est le levier
+  // qui tue le farming (un faux compte ne va pas en cours), mais il déplace le
+  // déclencheur du crédit vers le cron d'attendance → recâblage non trivial,
+  // laissé hors de ce commit pour ne pas fragiliser le flux d'inscription.
 
   // 6) Créditer le ticket au parrain, PUIS marquer le referral (ordre choisi
   // pour ne jamais marquer « crédité » sans ticket réel). On verrouille la
@@ -313,7 +438,11 @@ export async function completerReferral(
     .maybeSingle();
 
   if (markErr) {
-    console.error("[referral] Marquage referral completed échoué :", markErr.message);
+    log.error("Marquage referral completed échoué", {
+      referral_id: referralId,
+      parrain_user_id: parrainUserId,
+      db: markErr.message,
+    });
     // Le ticket est déjà inséré : on log, mais on considère le crédit fait.
     return { credited: true };
   }
@@ -321,9 +450,10 @@ export async function completerReferral(
     // Un appel concurrent a déjà marqué ce referral entre-temps → on vient de
     // créer un ticket en doublon. Compensation : on le retire (best-effort).
     // (Cas extrêmement rare ; on préfère recréditer juste 1 ticket.)
-    console.warn(
-      "[referral] Course détectée sur le marquage — rollback du ticket doublon.",
-    );
+    log.warn("Course détectée sur le marquage — rollback du ticket doublon", {
+      referral_id: referralId,
+      parrain_user_id: parrainUserId,
+    });
     await retirerDernierTicketParrainage(service, parrainUserId);
     return { credited: false };
   }

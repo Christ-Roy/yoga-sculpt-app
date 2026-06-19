@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { makeSupabaseMock, asMockResponse, type MockSupabase } from "../helpers/supabase-mock";
 
 /**
@@ -36,12 +36,22 @@ vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: vi.fn(() => serviceMock.client),
 }));
 
-// ── Mock google-calendar : getEvent / patchEvent contrôlés par test. ──────────
+// ── Mock google-calendar : getEvent / patchEvent / insertEvent / freeBusy. ────
 const getEventMock = vi.fn();
 const patchEventMock = vi.fn();
+const insertEventMock = vi.fn();
+const freeBusyQueryMock = vi.fn();
 vi.mock("@/lib/google-calendar", () => ({
   getEvent: (...args: unknown[]) => getEventMock(...args),
   patchEvent: (...args: unknown[]) => patchEventMock(...args),
+  insertEvent: (...args: unknown[]) => insertEventMock(...args),
+  freeBusyQuery: (...args: unknown[]) => freeBusyQueryMock(...args),
+}));
+
+// ── Mock notify-alice : on vérifie que la notif part (best-effort). ───────────
+const notifierAliceMock = vi.fn();
+vi.mock("@/lib/notify-alice", () => ({
+  notifierAlice: (...args: unknown[]) => notifierAliceMock(...args),
 }));
 
 const USER = { id: "user-1", email: "cliente@example.com", user_metadata: {} };
@@ -81,6 +91,9 @@ beforeEach(() => {
   serviceMock = makeSupabaseMock(USER);
   getEventMock.mockResolvedValue(EVENT_OK);
   patchEventMock.mockResolvedValue(undefined);
+  insertEventMock.mockResolvedValue({ id: "google-evt-new" });
+  freeBusyQueryMock.mockResolvedValue([]); // Alice libre par défaut
+  notifierAliceMock.mockResolvedValue(true);
 });
 
 describe("POST /api/reserver", () => {
@@ -163,6 +176,70 @@ describe("POST /api/reserver", () => {
 
     // L'attendee Google a bien été ajouté (PATCH appelé).
     expect(patchEventMock).toHaveBeenCalledTimes(1);
+
+    // Alice est notifiée de la nouvelle réservation (best-effort).
+    expect(notifierAliceMock).toHaveBeenCalledWith(
+      "reservation",
+      expect.objectContaining({ type: "collectif" }),
+    );
+  });
+
+  it("renvoie 502 si la lecture de l'event Google échoue (erreur non-404)", async () => {
+    getEventMock.mockRejectedValueOnce(new Error("Google API HTTP 500 Internal"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(502);
+  });
+
+  it("renvoie 404 si l'event Google est annulé (status cancelled)", async () => {
+    getEventMock.mockResolvedValueOnce({ ...EVENT_OK, status: "cancelled" });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(404);
+  });
+
+  it("renvoie 422 si l'event a des bornes de dates inexploitables", async () => {
+    getEventMock.mockResolvedValueOnce({ ...EVENT_OK, start: {}, end: {} });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(422);
+  });
+
+  it("renvoie 500 (et PAS 402) si la lecture des tickets échoue (blip DB)", async () => {
+    // On ne dit pas « rachetez un ticket » sur un simple échec de lecture.
+    serviceMock.queueResult("tickets", "select", {
+      data: null,
+      error: { message: "connection reset" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(500);
+  });
+
+  it("renvoie 500 si l'insert booking échoue sur une erreur NON-unique", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: null,
+      error: { code: "23502", message: "null value violates not-null" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    expect(res.status).toBe(500);
+  });
+
+  it("happy path reste 200 même si le reflet description (patchEvent) jette (best-effort)", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [TICKET], error: null });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-x", status: "confirmed", ticket_id: TICKET.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", { data: { id: TICKET.id }, error: null });
+    patchEventMock.mockRejectedValueOnce(new Error("Google PATCH 500"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(await POST(makeReq({ creneauId: CRENEAU_ID })));
+    // La réservation est conservée malgré l'échec cosmétique du reflet agenda.
+    expect(res.status).toBe(200);
+    expect((res.body as { ok?: boolean }).ok).toBe(true);
   });
 
   it("renvoie 409 + rollback du booking si la course sur le décrément est perdue", async () => {
@@ -185,6 +262,207 @@ describe("POST /api/reserver", () => {
     expect(deleteCall).toBeDefined();
     // On n'a PAS inscrit l'attendee Google (rollback avant le PATCH).
     expect(patchEventMock).not.toHaveBeenCalled();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODE B — cours PARTICULIER en créneau LIBRE
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("POST /api/reserver — cours particulier (créneau libre)", () => {
+  // Horloge figée : dimanche 2026-06-21 06:00 UTC. Le créneau visé (mardi 23 à
+  // 10h Paris) est largement à plus de 24h → valide.
+  const NOW = new Date("2026-06-21T06:00:00.000Z");
+  // Mardi 2026-06-23 10:00 Paris (= 08:00 UTC, été UTC+2).
+  const STARTS_AT = "2026-06-23T08:00:00.000Z";
+
+  const TICKET_PARTICULIER = {
+    ...TICKET,
+    id: "ticket-part-1",
+    type: "particulier",
+    quantite_restante: 2,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renvoie 400 si l'heure n'est pas dans la plage 9h-21h", async () => {
+    // 06:00 UTC = 08:00 Paris → avant 9h.
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(
+        makeReq({ type: "particulier", startsAt: "2026-06-23T06:00:00.000Z" }),
+      ),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("garde 24h : refuse (400) un créneau valide en heure mais à moins de 24h", async () => {
+    // NOW = dim. 08h Paris ; 11h Paris LE JOUR MÊME (09:00 UTC) = heure pleine
+    // dans la plage MAIS à moins de 24h → refus.
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(
+        makeReq({ type: "particulier", startsAt: "2026-06-21T09:00:00.000Z" }),
+      ),
+    );
+    expect(res.status).toBe(400);
+    // On n'a même pas interrogé le freebusy (échec en amont).
+    expect(freeBusyQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 502 si le re-check freebusy jette (service indisponible)", async () => {
+    freeBusyQueryMock.mockRejectedValueOnce(new Error("Google freebusy 500"));
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(502);
+    expect(insertEventMock).not.toHaveBeenCalled();
+  });
+
+  it("renvoie 500 si la lecture des tickets particuliers échoue (blip DB)", async () => {
+    serviceMock.queueResult("tickets", "select", {
+      data: null,
+      error: { message: "db timeout" },
+    });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(500);
+  });
+
+  it("renvoie 402 (needsPurchase) sans ticket particulier", async () => {
+    serviceMock.queueResult("tickets", "select", { data: [], error: null });
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(402);
+    expect((res.body as { type?: string }).type).toBe("particulier");
+  });
+
+  it("happy path : crée l'event Google, décrémente, notifie Alice", async () => {
+    serviceMock.queueResult("tickets", "select", {
+      data: [TICKET_PARTICULIER],
+      error: null,
+    });
+    const bookingRow = {
+      id: "booking-part-1",
+      user_id: USER.id,
+      type: "particulier",
+      google_event_id: "pending-user-1-...",
+      google_calendar_creneau_id: null,
+      starts_at: STARTS_AT,
+      ends_at: "2026-06-23T09:00:00.000Z",
+      status: "confirmed",
+      ticket_id: TICKET_PARTICULIER.id,
+      created_at: "2026-06-20T00:00:00.000Z",
+      cancelled_at: null,
+    };
+    serviceMock.queueResult("bookings", "insert", {
+      data: bookingRow,
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", {
+      data: { id: TICKET_PARTICULIER.id },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.body as { ok?: boolean }).ok).toBe(true);
+
+    // Le freebusy a été re-vérifié avant l'insert.
+    expect(freeBusyQueryMock).toHaveBeenCalled();
+    // L'event a bien été CRÉÉ (pas un getEvent : créneau libre).
+    expect(insertEventMock).toHaveBeenCalledTimes(1);
+    // Le ticket particulier décrémenté (2 → 1).
+    const updateCall = serviceMock.calls.find(
+      (c) => c.table === "tickets" && c.op === "update",
+    );
+    expect(updateCall?.payload).toEqual({ quantite_restante: 1 });
+    // Alice notifiée (particulier).
+    expect(notifierAliceMock).toHaveBeenCalledWith(
+      "reservation",
+      expect.objectContaining({ type: "particulier" }),
+    );
+  });
+
+  it("renvoie 409 si Alice est occupée sur ce créneau (re-check freebusy)", async () => {
+    freeBusyQueryMock.mockResolvedValueOnce([
+      { start: "2026-06-23T08:00:00.000Z", end: "2026-06-23T09:00:00.000Z" },
+    ]);
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(409);
+    // On n'a NI sélectionné de ticket NI créé d'event.
+    expect(insertEventMock).not.toHaveBeenCalled();
+  });
+
+  it("anti-chevauchement : 2e client sur le même horaire → 409 (23505)", async () => {
+    serviceMock.queueResult("tickets", "select", {
+      data: [TICKET_PARTICULIER],
+      error: null,
+    });
+    // L'insert booking tombe sur l'index unique (starts_at) → 23505.
+    serviceMock.queueResult("bookings", "insert", {
+      data: null,
+      error: { code: "23505", message: "duplicate key value" },
+    });
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+    expect(res.status).toBe(409);
+    // Le verrou tombe AVANT toute création d'event Google.
+    expect(insertEventMock).not.toHaveBeenCalled();
+  });
+
+  it("rollback complet si la création de l'event Google échoue → 502", async () => {
+    serviceMock.queueResult("tickets", "select", {
+      data: [TICKET_PARTICULIER],
+      error: null,
+    });
+    serviceMock.queueResult("bookings", "insert", {
+      data: { id: "booking-part-2", ticket_id: TICKET_PARTICULIER.id },
+      error: null,
+    });
+    serviceMock.queueResult("tickets", "update", {
+      data: { id: TICKET_PARTICULIER.id },
+      error: null,
+    });
+    // Recrédit (rollback) : lecture fraîche du ticket.
+    serviceMock.queueResult("tickets", "select", {
+      data: { ...TICKET_PARTICULIER, quantite_restante: 1 },
+      error: null,
+    });
+    insertEventMock.mockRejectedValueOnce(new Error("Google 500"));
+
+    const { POST } = await import("@/app/api/reserver/route");
+    const res = asMockResponse(
+      await POST(makeReq({ type: "particulier", startsAt: STARTS_AT })),
+    );
+
+    expect(res.status).toBe(502);
+    // Rollback : delete du booking fantôme.
+    const deleteCall = serviceMock.calls.find(
+      (c) => c.table === "bookings" && c.op === "delete",
+    );
+    expect(deleteCall).toBeDefined();
   });
 });
 

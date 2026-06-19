@@ -12,7 +12,7 @@
  * │   ✅ Uniquement Web Crypto (`crypto.subtle`) + `fetch`, dispos nativement │
  * │      sur Workers.                                                         │
  * │                                                                           │
- * │   Même approche que `src/app/api/webhooks/cal/route.ts` (HMAC SHA-256     │
+ * │   Même approche que `src/app/api/webhooks/stripe/route.ts` (HMAC SHA-256  │
  * │   fait main avec `crypto.subtle`) — ici on signe en RS256 pour le JWT.    │
  * └─────────────────────────────────────────────────────────────────────────┘
  *
@@ -503,4 +503,70 @@ export async function deleteEvent(eventId: string): Promise<void> {
   await calendarFetch<void>(eventsPath(`/${encodeURIComponent(eventId)}`), {
     method: "DELETE",
   });
+}
+
+// ============================================================================
+// FreeBusy — disponibilités d'Alice (cours particulier en créneau libre)
+// ============================================================================
+
+/** Un intervalle occupé renvoyé par `freebusy.query`. */
+export interface FreeBusyInterval {
+  /** Début (RFC3339). */
+  start: string;
+  /** Fin (RFC3339). */
+  end: string;
+}
+
+/** Réponse (sous-ensemble utile) de `freebusy.query`. */
+interface FreeBusyResponse {
+  kind?: string;
+  timeMin?: string;
+  timeMax?: string;
+  calendars?: Record<
+    string,
+    { busy?: FreeBusyInterval[]; errors?: { domain?: string; reason?: string }[] }
+  >;
+  [key: string]: unknown;
+}
+
+/**
+ * Interroge l'API `freebusy.query` pour le calendrier cible sur `[timeMin,
+ * timeMax)` et renvoie les intervalles OCCUPÉS (busy) d'Alice. Sert à générer
+ * les créneaux libres du cours particulier : plage 9h-21h MOINS ces busy.
+ *
+ * `freebusy` est l'endpoint le plus économique pour ça (il ne renvoie QUE les
+ * bornes occupées, sans détail d'event), et il agrège nativement les
+ * récurrences. On laisse remonter une erreur du calendrier (cf. `errors`) plutôt
+ * que de masquer une indispo : un calendrier illisible doit échouer franc côté
+ * route (502) au lieu d'ouvrir tout 9h-21h par erreur.
+ *
+ * @param timeMin borne basse (RFC3339, inclusive).
+ * @param timeMax borne haute (RFC3339, exclusive).
+ * @returns les intervalles busy (peut être vide), triés par début.
+ */
+export async function freeBusyQuery(
+  timeMin: string,
+  timeMax: string,
+): Promise<FreeBusyInterval[]> {
+  const calendarId = getCalendarId();
+
+  const data = await calendarFetch<FreeBusyResponse>("/freeBusy", {
+    method: "POST",
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      items: [{ id: calendarId }],
+    }),
+  });
+
+  const cal = data.calendars?.[calendarId];
+  if (cal?.errors && cal.errors.length > 0) {
+    const reasons = cal.errors.map((e) => e.reason || e.domain || "?").join(", ");
+    throw new Error(
+      `[google-calendar] freeBusy: calendrier en erreur (${reasons}).`,
+    );
+  }
+
+  const busy = cal?.busy ?? [];
+  return [...busy].sort((a, b) => a.start.localeCompare(b.start));
 }
