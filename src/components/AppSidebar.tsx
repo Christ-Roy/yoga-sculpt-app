@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarPlus, Gift, Home, LogOut, Ticket } from "lucide-react";
+import {
+  CalendarPlus,
+  Gift,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Ticket,
+} from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
 import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
@@ -20,6 +27,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 /** Liens de navigation de l'espace client. */
@@ -39,10 +47,29 @@ const LIENS = [
  *
  * Le lien actif est déterminé via `usePathname` (match exact pour `/espace`
  * afin de ne pas allumer l'accueil sur les sous-pages, préfixe sinon).
+ *
+ * `isAdmin` (résolu côté serveur dans le layout via `estAdmin(user.email)`) ne
+ * sert qu'à AFFICHER l'entrée « Administration » → `/admin` : aucun lien vers le
+ * back-office ne doit fuiter chez un client lambda. La SÉCURITÉ reste serveur
+ * (`requireAdmin()` garde déjà chaque page `/admin`) — ce flag est purement
+ * cosmétique, jamais une frontière d'autorisation.
  */
-export function AppSidebar({ userLabel }: { userLabel: string }) {
+export function AppSidebar({
+  userLabel,
+  isAdmin = false,
+}: {
+  userLabel: string;
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
+  // Sur mobile, la sidebar est un drawer (Sheet) qui PERSISTE entre les pages
+  // /espace (layout monté en continu) → il faut le refermer après un clic sur un
+  // lien, sinon il reste ouvert par-dessus la nouvelle page. Sur desktop, no-op.
+  const { isMobile, setOpenMobile } = useSidebar();
+  const fermerSiMobile = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   // Tickets de parrainage encore à gagner (PARRAINAGE_MAX - déjà gagnés).
   // > 0 → pastille rouge animée sur "Parrainer" pour inciter à inviter.
@@ -100,7 +127,11 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
                       isActive={estActif(lien.href)}
                       tooltip={lien.label}
                     >
-                      <Link href={lien.href} className="relative">
+                      <Link
+                        href={lien.href}
+                        onClick={fermerSiMobile}
+                        className="relative"
+                      >
                         <span className="relative">
                           <Icone />
                           {/* Pastille rouge animée : tickets de parrainage à gagner */}
@@ -130,6 +161,31 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Accès back-office — visible UNIQUEMENT pour les admins (Alice / Robert).
+            Le LIEN est masqué pour un client lambda (pas de bouton qui le
+            redirigerait) ; la garde serveur `requireAdmin()` reste l'autorité. */}
+        {isAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Administration</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname.startsWith("/admin")}
+                    tooltip="Administration"
+                  >
+                    <Link href="/admin" onClick={fermerSiMobile}>
+                      <LayoutDashboard />
+                      <span>Administration</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>

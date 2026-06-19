@@ -22,6 +22,7 @@
  * └─────────────────────────────────────────────────────────────────────────┘
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendTransactionalEmail } from "@/lib/brevo";
 import { createLogger, serializeError } from "@/lib/log";
 import {
@@ -46,6 +47,47 @@ const ALICE_EMAIL_FALLBACK = "gdry.alice@gmail.com";
 function emailAlice(): string {
   const env = process.env.ALICE_NOTIFY_EMAIL?.trim();
   return env || ALICE_EMAIL_FALLBACK;
+}
+
+/**
+ * Résout le téléphone du client à afficher à Alice.
+ *
+ * Historique : le tel arrivait UNIQUEMENT de l'objet auth Supabase
+ * (`user.phone` / `user.user_metadata.phone`). Or l'OAuth Google ne le fournit
+ * pas → la plupart des comptes n'en avaient pas. Depuis qu'on collecte le tel au
+ * paiement Stripe (rangé sur `profiles.phone`, cf webhook), la source de vérité
+ * du tel est `profiles.phone`. On lit donc :
+ *   1. le tel issu de l'auth (si présent — cas magic-link/saisie historique) ;
+ *   2. à défaut, `profiles.phone` (collecté au paiement ou au profil).
+ *
+ * Best-effort : toute erreur de lecture est avalée (renvoie le tel auth ou null).
+ *
+ * @param service client service_role (lecture profil, bypass RLS).
+ * @param userId  id du user concerné.
+ * @param telAuth tel déjà connu via l'objet auth (peut être null).
+ */
+export async function resoudreTelClient(
+  service: SupabaseClient,
+  userId: string,
+  telAuth: string | null | undefined,
+): Promise<string | null> {
+  const auth = telAuth?.trim();
+  if (auth) return auth; // l'auth fait foi quand il porte un tel.
+  try {
+    const { data } = await service
+      .from("profiles")
+      .select("phone")
+      .eq("id", userId)
+      .maybeSingle();
+    const phone = (data?.phone as string | null | undefined)?.trim();
+    return phone || null;
+  } catch (err) {
+    log.error("Lecture profiles.phone échouée (non bloquant)", {
+      user_id: userId,
+      err: serializeError(err),
+    });
+    return null;
+  }
 }
 
 /** Nature de l'événement notifié à Alice. */

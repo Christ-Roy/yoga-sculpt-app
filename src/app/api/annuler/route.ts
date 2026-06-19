@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEvent, patchEvent, deleteEvent } from "@/lib/google-calendar";
 import { logEvent } from "@/lib/events";
-import { notifierAlice } from "@/lib/notify-alice";
+import { notifierAlice, resoudreTelClient } from "@/lib/notify-alice";
 import type { Booking, Ticket } from "@/lib/db-types";
 import {
   retirerAttendee,
@@ -239,6 +239,12 @@ export async function POST(request: Request) {
   }
 
   // ── 6 bis) Notifie Alice de l'annulation (best-effort). ─────────────────────
+  // Tel : auth si présent, sinon profiles.phone (collecté au paiement Stripe).
+  const telAuth =
+    user.phone ||
+    (user.user_metadata?.phone as string | undefined) ||
+    (user.user_metadata?.telephone as string | undefined) ||
+    null;
   await notifierAlice("annulation", {
     type: booking.type,
     startsAt: booking.starts_at,
@@ -249,11 +255,7 @@ export async function POST(request: Request) {
       user.email ??
       null,
     clientEmail: user.email ?? null,
-    clientTel:
-      user.phone ||
-      (user.user_metadata?.phone as string | undefined) ||
-      (user.user_metadata?.telephone as string | undefined) ||
-      null,
+    clientTel: await resoudreTelClient(service, user.id, telAuth),
   });
 
   // ── Tracking : booking_cancelled. ───────────────────────────────────────────

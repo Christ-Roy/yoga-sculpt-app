@@ -66,6 +66,14 @@ html {
   color-scheme: dark;
 }
 
+/* Défilement doux pour les ancres internes (ex. tuile « Mon profil » du
+   dashboard → #mon-profil). Coupé sous prefers-reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   background: var(--bg);
   color: var(--text);

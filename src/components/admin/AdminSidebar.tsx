@@ -26,6 +26,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 /**
@@ -45,6 +46,12 @@ const LIENS = [
 export function AdminSidebar({ userLabel }: { userLabel: string }) {
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
+  // Mobile : referme le drawer après un clic (le layout admin persiste entre les
+  // pages /admin, le Sheet resterait ouvert sinon). Desktop : no-op.
+  const { isMobile, setOpenMobile } = useSidebar();
+  const fermerSiMobile = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
     <Sidebar collapsible="icon">
@@ -88,7 +95,7 @@ export function AdminSidebar({ userLabel }: { userLabel: string }) {
                       isActive={isActive}
                       tooltip={lien.label}
                     >
-                      <Link href={lien.href}>
+                      <Link href={lien.href} onClick={fermerSiMobile}>
                         <Icone />
                         <span>{lien.label}</span>
                       </Link>

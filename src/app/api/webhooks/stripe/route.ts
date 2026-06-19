@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { logEvent } from "@/lib/events";
 import { getUserGclid, recordAdsConversion } from "@/lib/ads-attribution";
+import { normalizePhone } from "@/lib/phone";
 import { createLogger, serializeError } from "@/lib/log";
 
 const log = createLogger("webhook:stripe");
@@ -49,6 +51,16 @@ interface StripeCheckoutSession {
   payment_status?: string;
   /** Montant total payé, en CENTIMES (devise mineure) — pour la LTV / le CA. */
   amount_total?: number | null;
+  /**
+   * Coordonnées saisies par le client sur la page de paiement Stripe. Le
+   * téléphone n'est présent que si `phone_number_collection` est activé côté
+   * Checkout (cf /api/checkout). Stripe le renvoie au format E.164 (`+33…`).
+   */
+  customer_details?: {
+    phone?: string | null;
+    email?: string | null;
+    name?: string | null;
+  } | null;
   metadata?: {
     user_id?: string;
     type?: string;
@@ -150,6 +162,47 @@ async function verifyStripeSignature(
 }
 
 /**
+ * Range le téléphone collecté par Stripe sur `profiles.phone`, SI le profil n'en
+ * a pas déjà un. Alice a besoin du tel de ses clientes pour les contacter, mais
+ * l'OAuth Google ne le fournit pas → on le récupère au paiement.
+ *
+ * Règles :
+ *   - on NE écrase JAMAIS un téléphone déjà renseigné (saisi à l'onboarding ou
+ *     dans le profil) — la source la plus ancienne fait foi ;
+ *   - on valide/normalise (E.164) avant d'écrire — pas de garbage en base ;
+ *   - BEST-EFFORT absolu : tout échec est avalé (le crédit ticket — métier — a
+ *     déjà réussi ; rien ne doit le faire échouer ni déclencher un rejeu Stripe).
+ */
+async function rangerTelephoneSiAbsent(
+  service: SupabaseClient,
+  userId: string,
+  rawPhone: string | null | undefined,
+): Promise<void> {
+  const phone = normalizePhone(rawPhone);
+  if (!phone) return; // pas de tel exploitable → rien à ranger.
+
+  try {
+    // Le profil a-t-il déjà un téléphone ? (on ne l'écrase pas).
+    const { data: existing } = await service
+      .from("profiles")
+      .select("phone")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existing?.phone) return; // déjà renseigné → on respecte l'existant.
+
+    await service.from("profiles").update({ phone }).eq("id", userId);
+    log.info("Téléphone Stripe rangé sur le profil", { user_id: userId });
+  } catch (err) {
+    // best-effort : on ne casse jamais le flux paiement pour le tel.
+    log.error("Rangement du téléphone Stripe échoué (non bloquant)", {
+      user_id: userId,
+      err: serializeError(err),
+    });
+  }
+}
+
+/**
  * Crédite les tickets correspondant à une session de paiement complétée.
  * Idempotent : déduplication sur `stripe_session_id` (index UNIQUE Lot B).
  */
@@ -200,6 +253,11 @@ async function crediterTickets(session: StripeCheckoutSession): Promise<void> {
     quantite,
     session_id: session.id,
   });
+
+  // ── Téléphone : on range celui collecté par Stripe si le profil n'en a pas. ─
+  // best-effort (le crédit ticket a déjà réussi). Permet à Alice de contacter
+  // les clientes dont le compte (OAuth Google) n'avait pas de tel.
+  await rangerTelephoneSiAbsent(supabase, userId, session.customer_details?.phone);
 
   // ── Tracking : checkout_completed + ticket_acquired (acquisition: paid). ────
   // best-effort (le crédit ticket — métier — a déjà réussi ; un log raté n'a pas

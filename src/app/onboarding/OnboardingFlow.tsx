@@ -305,27 +305,27 @@ export function OnboardingFlow({
         <div className="mt-5 grid gap-3 sm:mt-7 sm:grid-cols-2">
           <a
             href="/checkout?formule=collectif"
-            className="group flex items-center justify-between rounded-[4px] border border-accent bg-accent/10 px-5 py-4 transition-colors hover:bg-accent/15"
+            className="group flex items-center justify-between gap-3 rounded-[4px] border border-accent bg-accent/10 px-5 py-4 transition-colors hover:bg-accent/15"
           >
-            <span>
+            <span className="min-w-0">
               <span className="block font-display text-lg text-text">
                 Ticket collectif
               </span>
               <span className="text-xs text-text-secondary">Cours en groupe</span>
             </span>
-            <span className="font-display text-2xl text-accent">20€</span>
+            <span className="shrink-0 font-display text-2xl text-accent">20€</span>
           </a>
           <a
             href="/checkout?formule=particulier"
-            className="group flex items-center justify-between rounded-[4px] border border-border bg-surface px-5 py-4 transition-colors hover:border-accent/60"
+            className="group flex items-center justify-between gap-3 rounded-[4px] border border-border bg-surface px-5 py-4 transition-colors hover:border-accent/60"
           >
-            <span>
+            <span className="min-w-0">
               <span className="block font-display text-lg text-text">
                 Ticket particulier
               </span>
               <span className="text-xs text-text-secondary">Séance privée</span>
             </span>
-            <span className="font-display text-2xl text-accent">60€</span>
+            <span className="shrink-0 font-display text-2xl text-accent">60€</span>
           </a>
         </div>
 
