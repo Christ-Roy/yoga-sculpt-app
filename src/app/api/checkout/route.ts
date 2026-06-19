@@ -185,6 +185,11 @@ export async function POST(request: Request) {
     "line_items[0][quantity]": "1",
     success_url: `${origin}/espace/reserver?status=success`,
     cancel_url: `${origin}/espace/reserver?status=cancel`,
+    // Collecte du téléphone sur la page de paiement Stripe (champ obligatoire).
+    // Beaucoup de comptes (OAuth Google) n'ont pas de tel : on le récupère ici
+    // pour qu'Alice puisse contacter ses clientes. Stripe le renvoie ensuite
+    // dans `customer_details.phone` (relu par le webhook → profiles.phone).
+    "phone_number_collection[enabled]": "true",
     // CRUCIAL : relie le paiement au user pour le webhook (crédit des tickets).
     client_reference_id: user.id,
     customer_email: user.email ?? "",

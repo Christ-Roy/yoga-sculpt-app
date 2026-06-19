@@ -120,6 +120,8 @@ describe("POST /api/checkout", () => {
     expect(bodyStr).toContain("client_reference_id=user-1");
     expect(bodyStr).toContain("metadata%5Btype%5D=collectif");
     expect(bodyStr).toContain("metadata%5Bquantite%5D=1");
+    // Collecte du téléphone activée sur la page Stripe (champ obligatoire).
+    expect(bodyStr).toContain("phone_number_collection%5Benabled%5D=true");
   });
 
   it("renvoie 502 si Stripe répond une erreur", async () => {
