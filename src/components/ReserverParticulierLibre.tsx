@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { SlotLibre } from "@/lib/reservation";
+import { Spinner } from "@/components/ui/spinner";
 import {
   cleJour,
   formaterDateLongueFr,
@@ -253,17 +254,19 @@ export function ReserverParticulierLibre({
                               ? "Réserver (achat de ticket requis)"
                               : "Réserver ce créneau"
                       }
-                      className={`min-h-[44px] rounded-[4px] border px-2 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                      className={`inline-flex min-h-[44px] items-center justify-center rounded-[4px] border px-2 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                         libre
                           ? "border-accent/40 bg-accent/5 text-text hover:border-accent hover:bg-accent/15"
                           : "cursor-not-allowed border-border bg-surface/40 text-text-secondary/50 line-through"
                       } disabled:cursor-not-allowed`}
                     >
-                      {enChargement
-                        ? "…"
-                        : dejaReserve
-                          ? "✓"
-                          : `${heure}h`}
+                      {enChargement ? (
+                        <Spinner className="size-4" />
+                      ) : dejaReserve ? (
+                        "✓"
+                      ) : (
+                        `${heure}h`
+                      )}
                     </button>
                   );
                 })}

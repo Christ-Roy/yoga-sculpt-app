@@ -11,6 +11,7 @@ import {
   ProviderBadge,
   StatutBadge,
   SoldeInline,
+  FilleulStatutBadge,
 } from "../_components/CompteBadges";
 import { CompteActions } from "../_components/CompteActions";
 
@@ -188,9 +189,11 @@ export default async function CompteDetailPage({
                     className="flex flex-wrap items-center justify-between gap-2 rounded-[4px] border border-border bg-surface/40 px-3 py-2 text-sm"
                   >
                     <span className="text-text">{f.filleulEmail}</span>
-                    <span className="text-xs text-text-secondary">
-                      {f.status}
-                      {f.ticketCredite ? " · ticket crédité" : ""}
+                    <span className="flex items-center gap-2 text-xs text-text-secondary">
+                      <FilleulStatutBadge status={f.status} />
+                      {f.ticketCredite ? (
+                        <span>· ticket crédité</span>
+                      ) : null}
                     </span>
                   </li>
                 ))}

@@ -43,6 +43,33 @@ export function StatutBadge({ suspendu }: { suspendu: boolean }) {
   );
 }
 
+/**
+ * Badge de statut d'un filleul parrainé (fiche compte admin).
+ * Traduit la valeur DB technique en FR, cohérent avec l'espace client
+ * (ParrainerClient : « ✓ Inscrit » / « En attente »). Le texte porte
+ * l'information (pas seulement la couleur) → AA. `completed` = inscrit (or).
+ */
+export function FilleulStatutBadge({ status }: { status: string }) {
+  const inscrit = status === "completed";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-0.5 text-[11px] uppercase tracking-wide ${
+        inscrit
+          ? "border-accent/40 text-accent"
+          : "border-border text-text-secondary"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 rounded-full ${
+          inscrit ? "bg-accent" : "bg-text-secondary"
+        }`}
+      />
+      {inscrit ? "Inscrit" : "En attente"}
+    </span>
+  );
+}
+
 /** Affiche le solde de séances par type, sobrement. */
 export function SoldeInline({
   collectif,

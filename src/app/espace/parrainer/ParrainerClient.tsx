@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ShareInvitation } from "@/components/ShareInvitation";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Orchestrateur client de la page parrainage.
@@ -35,10 +35,7 @@ export function ParrainerClient() {
   const [data, setData] = useState<ParrainageData | null>(null);
   const [erreur, setErreur] = useState(false);
   const [filleuls, setFilleuls] = useState<Filleul[]>([]);
-  const [toast, setToast] = useState<{
-    message: string;
-    variant: ToastVariant;
-  } | null>(null);
+  const { toast } = useToast();
 
   // Chargement initial (fetch inline avec garde d'annulation : aucun setState
   // synchrone dans l'effect).
@@ -71,10 +68,7 @@ export function ParrainerClient() {
 
   /** Après une invitation acceptée : ajout optimiste + resync serveur. */
   function onInvite(email: string) {
-    setToast({
-      message: `Invitation envoyée à ${email}.`,
-      variant: "success",
-    });
+    toast(`Invitation envoyée à ${email}.`, "success");
 
     // Ajout optimiste (sans doublon) en tête de liste, statut « en attente ».
     setFilleuls((liste) => {
@@ -192,14 +186,6 @@ export function ParrainerClient() {
           </ul>
         )}
       </section>
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }

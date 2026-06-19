@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/Button";
+import { useToast } from "@/components/ui/toast";
 import { updateProfile, type ProfileState } from "./actions";
 
 const initial: ProfileState = {};
@@ -21,6 +22,7 @@ export function ProfileCard({
 }) {
   const [editing, setEditing] = useState(false);
   const [state, formAction, pending] = useActionState(updateProfile, initial);
+  const { toast } = useToast();
 
   // Referme le formulaire après une sauvegarde réussie, sans useEffect :
   // pattern React officiel "adjust state during render" — on compare le
@@ -31,6 +33,7 @@ export function ProfileCard({
     setPrevOk(state.ok);
     if (state.ok && editing) {
       setEditing(false);
+      toast("Profil mis à jour.", "success");
     }
   }
 
@@ -78,7 +81,7 @@ export function ProfileCard({
           )}
 
           <div className="flex gap-3">
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" loading={pending}>
               {pending ? "Enregistrement…" : "Enregistrer"}
             </Button>
             <Button
@@ -99,10 +102,6 @@ export function ProfileCard({
           <Row label="Objectif" value={goal || "—"} />
           <Row label="Niveau" value={level || "—"} />
         </dl>
-      )}
-
-      {state.ok && !editing && (
-        <p className="mt-4 text-sm text-accent">Profil mis à jour.</p>
       )}
     </section>
   );

@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 export function InviterCompte() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [enCours, setEnCours] = useState(false);
   const [email, setEmail] = useState("");
   const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(
     null,
@@ -23,6 +24,7 @@ export function InviterCompte() {
     const valeur = email.trim();
     if (!valeur) return;
     setFeedback(null);
+    setEnCours(true);
     try {
       const res = await fetch("/api/admin/users/inviter", {
         method: "POST",
@@ -42,6 +44,8 @@ export function InviterCompte() {
       startTransition(() => router.refresh());
     } catch {
       setFeedback({ ok: false, message: "Erreur réseau. Réessayez." });
+    } finally {
+      setEnCours(false);
     }
   }
 
@@ -62,7 +66,12 @@ export function InviterCompte() {
             autoComplete="off"
           />
         </label>
-        <Button type="button" disabled={pending || !email.trim()} onClick={inviter}>
+        <Button
+          type="button"
+          disabled={pending || enCours || !email.trim()}
+          loading={enCours}
+          onClick={inviter}
+        >
           Inviter
         </Button>
       </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { CalendarPlus, Pencil, Trash2, Repeat, Ban, X } from "lucide-react";
-import { Toast, type ToastVariant } from "@/components/Toast";
+import { useToast, type ToastVariant } from "@/components/ui/toast";
 import { TypeBadge } from "@/components/admin/TypeBadge";
 import { formatDate, formatPlage } from "@/lib/admin-format";
 import type { TicketType } from "@/lib/db-types";
@@ -29,11 +29,6 @@ const btnGhost =
 const btnDanger =
   "inline-flex min-h-[40px] items-center justify-center gap-2 rounded-[4px] border border-red-500/40 bg-surface px-3 py-2 text-sm text-red-300 transition-colors hover:border-red-500/70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500";
 
-interface ToastState {
-  message: string;
-  variant: ToastVariant;
-}
-
 /** Lit `{ error }` d'une réponse non-ok, avec fallback. */
 async function lireErreur(res: Response, fallback: string): Promise<string> {
   try {
@@ -53,12 +48,8 @@ export function CalendrierClient({
 }) {
   const [creneaux, setCreneaux] = useState<CreneauAdmin[]>(creneauxInitiaux);
   const [presets, setPresets] = useState<SlotPreset[]>(presetsInitiaux);
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [pending, startTransition] = useTransition();
-
-  const notify = useCallback((message: string, variant: ToastVariant = "success") => {
-    setToast({ message, variant });
-  }, []);
+  const { toast: notify } = useToast();
 
   // ── Rechargements depuis les routes (source de vérité) ─────────────────────
   const rechargerCreneaux = useCallback(async () => {
@@ -100,14 +91,6 @@ export function CalendrierClient({
       />
 
       <BloquerJour notify={notify} pending={pending} startTransition={startTransition} />
-
-      {toast && (
-        <Toast
-          message={toast.message}
-          variant={toast.variant}
-          onClose={() => setToast(null)}
-        />
-      )}
     </div>
   );
 }

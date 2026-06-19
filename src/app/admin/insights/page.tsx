@@ -210,7 +210,8 @@ export default async function AdminInsightsPage() {
           {users.length === 0 ? (
             <EmptyState>Aucun utilisateur pour l&apos;instant.</EmptyState>
           ) : (
-            <div className="overflow-x-auto rounded-[4px] border border-border">
+            <>
+            <div className="hidden overflow-x-auto rounded-[4px] border border-border md:block">
               <table className="w-full min-w-[860px] border-collapse text-sm">
                 <caption className="sr-only">
                   Signaux agrégés par utilisateur
@@ -300,6 +301,90 @@ export default async function AdminInsightsPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile : une carte par utilisateur (libellés = en-têtes) */}
+            <ul className="flex flex-col gap-3 md:hidden">
+              {users.map((u) => {
+                const parrain = u.parrainUserId
+                  ? labelParId.get(u.parrainUserId)
+                  : undefined;
+                return (
+                  <li
+                    key={`m-${u.userId}`}
+                    className="rounded-[4px] border border-border bg-surface/60 p-4 text-sm"
+                  >
+                    <p className="text-text">{libelleUser(u)}</p>
+                    {u.email ? (
+                      <p className="text-xs text-text-secondary">{u.email}</p>
+                    ) : null}
+                    {!u.onboardingCompleted ? (
+                      <p className="mt-0.5 text-[11px] text-text-secondary">
+                        onboarding non terminé
+                      </p>
+                    ) : null}
+
+                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                      <div className="col-span-2">
+                        <dt className="text-text-secondary">Acquisition</dt>
+                        <dd className="mt-0.5">
+                          {u.acquisitionSource === "referral" ? (
+                            <span className="inline-flex items-center rounded-[4px] border border-accent/40 px-2 py-0.5 text-[11px] uppercase tracking-wide text-accent">
+                              Parrainé
+                            </span>
+                          ) : (
+                            <span className="text-text-secondary">Direct</span>
+                          )}
+                          {parrain ? (
+                            <span className="ml-1 text-[11px] text-text-secondary">
+                              par {libelleUser(parrain)}
+                            </span>
+                          ) : null}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">Séances</dt>
+                        <dd className="mt-0.5 text-text">
+                          {u.nbSeancesPassees} passées · {u.nbSeancesAVenir} à venir
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">Tickets</dt>
+                        <dd className="mt-0.5 text-text">
+                          {u.nbTicketsPayes} payés · {u.nbTicketsTotal} au total
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">Filleuls</dt>
+                        <dd className="mt-0.5 text-text">{u.nbFilleulsCredites}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">Abandons</dt>
+                        <dd
+                          className={`mt-0.5 ${
+                            u.checkoutAbandonnes > 0
+                              ? "text-accent"
+                              : "text-text-secondary"
+                          }`}
+                        >
+                          {u.checkoutAbandonnes}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">LTV</dt>
+                        <dd className="mt-0.5 text-text">{formatEuro(u.ltvEur)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-secondary">Dernière activité</dt>
+                        <dd className="mt-0.5 text-text">
+                          {formatDate(u.derniereActivite)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+            </>
           )}
         </section>
 

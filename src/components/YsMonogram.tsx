@@ -16,7 +16,7 @@
  *
  * Robustesse :
  *   - SVG inline, viewBox 0 0 120 120, mono-couleur or sur noir.
- *   - Theme-able via la prop `color` (défaut : var(--gold) avec fallback).
+ *   - Theme-able via la prop `color` (défaut : var(--accent) avec fallback).
  *   - ID de filtre déterministe dérivé de `title` → SSR/edge-safe, zéro
  *     collision quand navbar + footer + hero rendent plusieurs instances.
  *   - Animation CSS pure (keyframes scopées), coupée sous
@@ -37,7 +37,7 @@ import type { CSSProperties } from "react";
 type YsMonogramProps = {
   /** Classe Tailwind/CSS pour dimensionner (ex. "h-11 w-11"). */
   className?: string;
-  /** Couleur du trait. Défaut : la CSS var --gold (#D4AD6A en fallback). */
+  /** Couleur du trait. Défaut : la CSS var --accent (#D4AD6A en fallback). */
   color?: string;
   /** Active le tracé + la respiration + le glow. Défaut : true. */
   animate?: boolean;
@@ -67,7 +67,7 @@ const ARM_LEN = 33; // bras droit du Y : 32.1, arrondi haut
 
 export default function YsMonogram({
   className = "",
-  color = "var(--gold, #D4AD6A)",
+  color = "var(--accent, #D4AD6A)",
   animate = true,
   title = "Yoga Sculpt",
 }: YsMonogramProps) {
