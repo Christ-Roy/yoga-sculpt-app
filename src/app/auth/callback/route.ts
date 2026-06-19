@@ -6,6 +6,9 @@ import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
 import { logEvent } from "@/lib/events";
 import { safeInternalRedirect } from "@/lib/auth-redirect";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("auth/callback");
 
 /**
  * OAuth / magic-link callback.
@@ -118,7 +121,10 @@ export async function GET(request: Request) {
         }
       } catch (referralErr) {
         // Le parrainage est secondaire : on ne casse pas la connexion pour ça.
-        console.error("[auth/callback] Parrainage best-effort échoué :", referralErr);
+        log.error("Parrainage best-effort échoué", {
+          user_id: user.id,
+          err: serializeError(referralErr),
+        });
       }
     }
 

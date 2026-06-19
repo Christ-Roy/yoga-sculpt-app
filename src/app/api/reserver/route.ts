@@ -19,6 +19,9 @@ import {
   TZ_AFFICHAGE,
 } from "@/lib/reservation";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("reserver");
 
 /**
  * POST /api/reserver — réserve un cours contre un ticket. DEUX modes :
@@ -164,7 +167,11 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
-    console.error("[reserver] Lecture de l'event Google échouée :", err);
+    log.error("Lecture de l'event Google échouée", {
+      creneau_id: creneauId,
+      user_id: user.id,
+      err: serializeError(err),
+    });
     return NextResponse.json(
       { error: "Service de réservation indisponible." },
       { status: 502 },
@@ -227,7 +234,11 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    console.error("[reserver] Insert booking échoué :", insertErr.message);
+    log.error("Insert booking échoué", {
+      creneau_id: creneauId,
+      user_id: user.id,
+      db: insertErr.message,
+    });
     return NextResponse.json({ error: "Réservation impossible." }, { status: 500 });
   }
 
@@ -259,10 +270,11 @@ export async function POST(request: Request) {
 
     await patchEvent(creneauId, { description: nouvelleDesc });
   } catch (err) {
-    console.error(
-      "[reserver] Reflet agenda (description) échoué — réservation conservée :",
-      err,
-    );
+    log.error("Reflet agenda (description) échoué — réservation conservée", {
+      booking_id: booking.id,
+      creneau_id: creneauId,
+      err: serializeError(err),
+    });
   }
 
   // ── Notif Alice (best-effort) + tracking. ───────────────────────────────────
@@ -331,7 +343,11 @@ async function reserverParticulierLibre(
       );
     }
   } catch (err) {
-    console.error("[reserver] freebusy (particulier) échoué :", err);
+    log.error("freebusy (particulier) échoué", {
+      user_id: user.id,
+      starts_at: startsAt,
+      err: serializeError(err),
+    });
     return NextResponse.json(
       { error: "Service de réservation indisponible." },
       { status: 502 },
@@ -383,7 +399,11 @@ async function reserverParticulierLibre(
         { status: 409 },
       );
     }
-    console.error("[reserver] Insert booking (particulier) échoué :", insertErr.message);
+    log.error("Insert booking (particulier) échoué", {
+      user_id: user.id,
+      starts_at: startsAt,
+      db: insertErr.message,
+    });
     return NextResponse.json({ error: "Réservation impossible." }, { status: 500 });
   }
 
@@ -416,7 +436,11 @@ async function reserverParticulierLibre(
     if (!created.id) throw new Error("event créé sans id");
     googleEventId = created.id;
   } catch (err) {
-    console.error("[reserver] Création event Google (particulier) échouée — rollback :", err);
+    log.error("Création event Google (particulier) échouée — rollback", {
+      booking_id: booking.id,
+      ticket_id: ticket.id,
+      err: serializeError(err),
+    });
     // Rollback : on recrédite le ticket (qu'on a décrémenté à l'étape 5) puis on
     // supprime le booking (pas de fantôme). Recrédit en lecture-fraîche + min
     // (même pattern que /api/annuler) pour ne pas clobberer une écriture
@@ -438,10 +462,11 @@ async function reserverParticulierLibre(
     .update({ google_event_id: googleEventId })
     .eq("id", booking.id);
   if (linkErr) {
-    console.error(
-      "[reserver] Lien booking↔event Google échoué (résa conservée) :",
-      linkErr.message,
-    );
+    log.error("Lien booking↔event Google échoué (résa conservée)", {
+      booking_id: booking.id,
+      google_event_id: googleEventId,
+      db: linkErr.message,
+    });
   } else {
     booking.google_event_id = googleEventId;
   }
@@ -495,7 +520,11 @@ async function selectionnerTicket(
     .limit(1);
 
   if (error) {
-    console.error("[reserver] Lecture des tickets échouée :", error.message);
+    log.error("Lecture des tickets échouée", {
+      user_id: userId,
+      type,
+      db: error.message,
+    });
     return { error: true };
   }
   return { ticket: (tickets?.[0] as Ticket | undefined) ?? null };
@@ -517,7 +546,10 @@ async function decrementerTicket(
     .select("id")
     .maybeSingle();
   if (error) {
-    console.error("[reserver] Décrément ticket échoué :", error.message);
+    log.error("Décrément ticket échoué", {
+      ticket_id: ticket.id,
+      db: error.message,
+    });
     return false;
   }
   return Boolean(data);
@@ -538,7 +570,11 @@ async function recrediterTicket(
     .eq("id", ticketId)
     .maybeSingle();
   if (loadErr || !row) {
-    if (loadErr) console.error("[reserver] Recrédit (lecture) échoué :", loadErr.message);
+    if (loadErr)
+      log.error("Recrédit (lecture) échoué", {
+        ticket_id: ticketId,
+        db: loadErr.message,
+      });
     return;
   }
   const t = row as Ticket;
@@ -547,7 +583,11 @@ async function recrediterTicket(
     .from("tickets")
     .update({ quantite_restante: recredite })
     .eq("id", ticketId);
-  if (updErr) console.error("[reserver] Recrédit (update) échoué :", updErr.message);
+  if (updErr)
+    log.error("Recrédit (update) échoué", {
+      ticket_id: ticketId,
+      db: updErr.message,
+    });
 }
 
 // La réservation se fait uniquement en POST. Tout autre verbe → 405 explicite.

@@ -14,6 +14,10 @@
  * └─────────────────────────────────────────────────────────────────────────┘
  */
 
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("brevo");
+
 /** Endpoint d'envoi transactionnel Brevo. */
 const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
@@ -76,9 +80,9 @@ export async function sendTransactionalEmail(
     // On lit le corps d'erreur pour un log exploitable (Brevo renvoie un JSON
     // `{ code, message }`). On ne propage pas la clé API dans le message.
     const detail = await response.text().catch(() => "");
-    console.error(
-      `[brevo] Envoi échoué — HTTP ${response.status} pour ${to} : ${detail}`,
-    );
+    // PII : on ne logge PAS l'email destinataire `to`. Le status + le détail
+    // Brevo (code/message d'erreur, jamais la clé API) suffisent au debug.
+    log.error("Envoi transactionnel échoué", { status: response.status, detail });
     throw new Error(`Brevo a répondu ${response.status}.`);
   }
 }

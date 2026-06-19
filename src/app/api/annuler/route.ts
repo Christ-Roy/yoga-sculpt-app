@@ -11,6 +11,9 @@ import {
   dansMoinsDe,
   DELAI_ANNULATION_HEURES,
 } from "@/lib/reservation";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("annuler");
 
 /**
  * POST /api/annuler — annule une réservation confirmée.
@@ -89,7 +92,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (loadErr) {
-    console.error("[annuler] Lecture du booking échouée :", loadErr.message);
+    log.error("Lecture du booking échouée", {
+      booking_id: bookingId,
+      user_id: user.id,
+      db: loadErr.message,
+    });
     return NextResponse.json(
       { error: "Impossible de charger la réservation." },
       { status: 500 },
@@ -147,7 +154,11 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (cancelErr) {
-    console.error("[annuler] Update booking échoué :", cancelErr.message);
+    log.error("Update booking échoué", {
+      booking_id: booking.id,
+      user_id: user.id,
+      db: cancelErr.message,
+    });
     return NextResponse.json(
       { error: "Annulation impossible." },
       { status: 500 },
@@ -170,10 +181,11 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (ticketLoadErr) {
-      console.error(
-        "[annuler] Lecture ticket pour recrédit échouée :",
-        ticketLoadErr.message,
-      );
+      log.error("Lecture ticket pour recrédit échouée", {
+        booking_id: booking.id,
+        ticket_id: booking.ticket_id,
+        db: ticketLoadErr.message,
+      });
     } else if (ticketRow) {
       const ticket = ticketRow as Ticket;
       const recredite = Math.min(
@@ -185,7 +197,11 @@ export async function POST(request: Request) {
         .update({ quantite_restante: recredite })
         .eq("id", ticket.id);
       if (recreditErr) {
-        console.error("[annuler] Recrédit ticket échoué :", recreditErr.message);
+        log.error("Recrédit ticket échoué", {
+          booking_id: booking.id,
+          ticket_id: ticket.id,
+          db: recreditErr.message,
+        });
       } else {
         ticketRecredite = true;
       }
@@ -214,10 +230,11 @@ export async function POST(request: Request) {
     } catch (err) {
       // L'annulation métier (étape 4) a réussi : on n'échoue pas la requête
       // pour un effet de bord Google. On log pour réconciliation manuelle.
-      console.error(
-        "[annuler] MAJ event Google échouée (annulation maintenue) :",
-        err,
-      );
+      log.error("MAJ event Google échouée (annulation maintenue)", {
+        booking_id: booking.id,
+        type: booking.type,
+        err: serializeError(err),
+      });
     }
   }
 

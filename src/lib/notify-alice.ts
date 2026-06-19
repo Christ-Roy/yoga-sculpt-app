@@ -23,6 +23,7 @@
  */
 
 import { sendTransactionalEmail } from "@/lib/brevo";
+import { createLogger, serializeError } from "@/lib/log";
 import {
   renderEmail,
   textFromBlocks,
@@ -35,6 +36,8 @@ import {
   libelleType,
 } from "@/lib/reservation";
 import type { TicketType } from "@/lib/db-types";
+
+const log = createLogger("notify-alice");
 
 /** Email d'Alice par défaut si `ALICE_NOTIFY_EMAIL` n'est pas configuré. */
 const ALICE_EMAIL_FALLBACK = "gdry.alice@gmail.com";
@@ -172,10 +175,10 @@ export async function notifierAlice(
     return true;
   } catch (err) {
     // Best-effort : on n'échoue JAMAIS le flux métier pour une notif ratée.
-    console.error(
-      `[notify-alice] notifierAlice('${evenement}') échoué (non bloquant) :`,
-      err,
-    );
+    log.error("notifierAlice échoué (non bloquant)", {
+      evenement,
+      err: serializeError(err),
+    });
     return false;
   }
 }

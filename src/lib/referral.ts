@@ -23,6 +23,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreditReferral } from "@/lib/anti-abuse";
 import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
+import { createLogger } from "@/lib/log";
+
+const log = createLogger("referral");
 
 /**
  * Plafond EFFECTIF de parrainages crédités par parrain (anti-farming).
@@ -92,7 +95,7 @@ export async function getOrCreateCode(
     .maybeSingle();
 
   if (readErr) {
-    console.error("[referral] Lecture profile échouée :", readErr.message);
+    log.error("Lecture profile échouée", { user_id: userId, db: readErr.message });
     return null;
   }
   if (profile?.referral_code) {
@@ -126,10 +129,15 @@ export async function getOrCreateCode(
       // Collision de code (déjà pris par un autre profil) → on régénère.
       continue;
     }
-    console.error("[referral] Écriture referral_code échouée :", updErr.message);
+    log.error("Écriture referral_code échouée", {
+      user_id: userId,
+      db: updErr.message,
+    });
     return null;
   }
-  console.error("[referral] Impossible de générer un code unique après 5 essais.");
+  log.error("Impossible de générer un code unique après 5 essais", {
+    user_id: userId,
+  });
   return null;
 }
 
@@ -166,7 +174,10 @@ export async function enregistrerSignaux(
     .upsert(row, { onConflict: "user_id" });
 
   if (error) {
-    console.error("[referral] Upsert account_signals échoué :", error.message);
+    log.error("Upsert account_signals échoué", {
+      user_id: userId,
+      db: error.message,
+    });
   }
 }
 
@@ -189,7 +200,10 @@ async function crediterTicketParrain(
     // expires_at null = pas d'expiration imposée au cadeau.
   });
   if (error) {
-    console.error("[referral] Insert ticket parrainage échoué :", error.message);
+    log.error("Insert ticket parrainage échoué", {
+      parrain_user_id: parrainUserId,
+      db: error.message,
+    });
     return false;
   }
   return true;
@@ -239,7 +253,7 @@ export async function completerReferral(
     .maybeSingle();
 
   if (parrainErr) {
-    console.error("[referral] Résolution code parrain échouée :", parrainErr.message);
+    log.error("Résolution code parrain échouée", { db: parrainErr.message });
     return { credited: false };
   }
   if (!parrainProfile?.id) {
@@ -304,10 +318,11 @@ export async function completerReferral(
       .select("id")
       .single();
     if (createErr || !created) {
-      console.error(
-        "[referral] Création referral à la volée échouée :",
-        createErr?.message,
-      );
+      log.error("Création referral à la volée échouée", {
+        parrain_user_id: parrainUserId,
+        filleul_user_id: params.filleulUserId,
+        db: createErr?.message,
+      });
       return { credited: false };
     }
     referralId = created.id as string;
@@ -324,7 +339,10 @@ export async function completerReferral(
     .eq("parrain_user_id", parrainUserId)
     .eq("ticket_credite", true);
   if (countErr) {
-    console.error("[referral] Comptage plafond parrain échoué :", countErr.message);
+    log.error("Comptage plafond parrain échoué", {
+      parrain_user_id: parrainUserId,
+      db: countErr.message,
+    });
     return { credited: false };
   }
   if ((dejaCredites ?? 0) >= plafond) {
@@ -362,7 +380,11 @@ export async function completerReferral(
     .maybeSingle();
 
   if (markErr) {
-    console.error("[referral] Marquage referral completed échoué :", markErr.message);
+    log.error("Marquage referral completed échoué", {
+      referral_id: referralId,
+      parrain_user_id: parrainUserId,
+      db: markErr.message,
+    });
     // Le ticket est déjà inséré : on log, mais on considère le crédit fait.
     return { credited: true };
   }
@@ -370,9 +392,10 @@ export async function completerReferral(
     // Un appel concurrent a déjà marqué ce referral entre-temps → on vient de
     // créer un ticket en doublon. Compensation : on le retire (best-effort).
     // (Cas extrêmement rare ; on préfère recréditer juste 1 ticket.)
-    console.warn(
-      "[referral] Course détectée sur le marquage — rollback du ticket doublon.",
-    );
+    log.warn("Course détectée sur le marquage — rollback du ticket doublon", {
+      referral_id: referralId,
+      parrain_user_id: parrainUserId,
+    });
     await retirerDernierTicketParrainage(service, parrainUserId);
     return { credited: false };
   }

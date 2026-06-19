@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/events";
+import { createLogger, serializeError } from "@/lib/log";
+
+const log = createLogger("checkout");
 
 /**
  * Création d'une session de paiement Stripe pour un « carnet de tickets ».
@@ -202,7 +205,10 @@ export async function POST(request: Request) {
       body: params,
     });
   } catch (err) {
-    console.error("[checkout] Appel Stripe échoué (réseau) :", err);
+    log.error("Appel Stripe échoué (réseau)", {
+      user_id: user.id,
+      err: serializeError(err),
+    });
     return NextResponse.json(
       { error: "Service de paiement indisponible." },
       { status: 502 },
@@ -213,9 +219,11 @@ export async function POST(request: Request) {
     // On log la réponse brute Stripe (utile au debug) mais on ne la renvoie pas
     // au client (peut contenir des détails internes).
     const errorText = await stripeResponse.text();
-    console.error(
-      `[checkout] Stripe a renvoyé ${stripeResponse.status} : ${errorText}`,
-    );
+    log.error("Stripe a renvoyé un statut non-2xx", {
+      user_id: user.id,
+      status: stripeResponse.status,
+      detail: errorText,
+    });
     return NextResponse.json(
       { error: "Création de la session de paiement impossible." },
       { status: 502 },
@@ -228,7 +236,11 @@ export async function POST(request: Request) {
     amount_total?: number | null;
   };
   if (!session.url) {
-    console.error("[checkout] Réponse Stripe sans `url` :", session);
+    // On ne logge PAS l'objet `session` complet (peut contenir customer_email).
+    log.error("Réponse Stripe sans `url`", {
+      user_id: user.id,
+      session_id: session.id ?? null,
+    });
     return NextResponse.json(
       { error: "Session de paiement invalide." },
       { status: 502 },
