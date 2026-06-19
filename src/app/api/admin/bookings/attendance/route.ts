@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { createServiceClient } from "@/lib/supabase/service";
+import { crediterParrainsApresSeanceHonoree } from "@/lib/referral";
 import { attendanceBodySchema, attendanceToColumn } from "../_logic";
-import { createLogger } from "@/lib/log";
+import { createLogger, serializeError } from "@/lib/log";
 
 const log = createLogger("admin/attendance");
 
@@ -53,10 +54,12 @@ export async function POST(request: Request) {
 
   const service = createServiceClient();
 
-  // ── 1) Vérifie l'existence du booking (404 sinon). ──────────────────────────
+  // ── 1) Vérifie l'existence du booking (404 sinon). On lit aussi `user_id`
+  //       (filleul potentiel) et l'état d'attendance ACTUEL pour ne déclencher
+  //       le crédit de parrainage QUE sur une TRANSITION vers 'attended'. ───────
   const { data: bookingRow, error: loadErr } = await service
     .from("bookings")
-    .select("id")
+    .select("id, user_id, attendance")
     .eq("id", body.bookingId)
     .maybeSingle();
 
@@ -86,6 +89,35 @@ export async function POST(request: Request) {
       { error: "Enregistrement de la présence impossible." },
       { status: 500 },
     );
+  }
+
+  // ── 3) ANTI-FARMING — crédit du parrainage à la 1re séance HONORÉE. ──────────
+  // C'est ICI (et plus à l'inscription) que tombe le ticket du parrain : quand le
+  // filleul est pointé PRÉSENT pour la 1re fois. On ne déclenche que sur une
+  // TRANSITION vers 'attended' (pas si c'était déjà 'attended' → évite le travail
+  // inutile ; le crédit est de toute façon idempotent via `ticket_credite`).
+  // Best-effort ABSOLU : un échec de crédit ne doit jamais faire échouer le
+  // pointage de présence d'Alice (la réponse reste 200).
+  const previousAttendance = (bookingRow as { attendance: string | null }).attendance;
+  const userId = (bookingRow as { user_id: string | null }).user_id;
+  if (colValue === "attended" && previousAttendance !== "attended" && userId) {
+    try {
+      const credites = await crediterParrainsApresSeanceHonoree(service, userId);
+      if (credites > 0) {
+        log.info("Parrain(s) crédité(s) après séance honorée", {
+          filleul_user_id: userId,
+          booking_id: body.bookingId,
+          credites,
+        });
+      }
+    } catch (refErr) {
+      // crediterParrainsApresSeanceHonoree est déjà best-effort, mais on isole
+      // par sûreté : le pointage reste un succès quoi qu'il arrive.
+      log.error("Crédit parrainage post-séance échoué (pointage OK)", {
+        filleul_user_id: userId,
+        err: serializeError(refErr),
+      });
+    }
   }
 
   return NextResponse.json({ ok: true, attendance: body.attendance });

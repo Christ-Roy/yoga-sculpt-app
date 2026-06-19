@@ -213,6 +213,9 @@ export async function drainAdsConversions(
         conversionActionResourceName: action,
         conversionDateTimeIso: row.created_at as string,
         valueEur: Number(row.value_eur),
+        // transactionId stable = clé idempotente de la ligne (kind:source_ref).
+        // Un rejeu ré-uploade le même id → Google ne compte pas 2× la conversion.
+        transactionId: `${row.kind}:${row.source_ref}`,
       });
       await service
         .from("ads_conversions")

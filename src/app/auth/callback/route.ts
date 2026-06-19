@@ -111,6 +111,9 @@ export async function GET(request: Request) {
 
         const refCode = cookieStore.get("ys_ref")?.value;
         if (refCode) {
+          // ANTI-FARMING : completerReferral LIE le filleul au parrain en
+          // `pending` SANS créditer. Le ticket du parrain ne tombera qu'à la 1re
+          // séance HONORÉE du filleul (cf. lib/referral + route admin attendance).
           const result = await completerReferral(service, {
             code: refCode,
             filleulUserId: user.id,
@@ -123,13 +126,17 @@ export async function GET(request: Request) {
           // On ne consomme plus le cookie httpOnly : le client (Fingerprint
           // collector) a besoin du jumeau `ys_ref_pub` pour rejouer /completer
           // AVEC le fingerprint. `ys_ref` expirera seul (maxAge ~30 min).
-          // Tracking best-effort (ne casse jamais l'auth) : crédité vs bloqué.
-          void logEvent(
-            user.id,
-            result.credited ? "referral_credited" : "referral_blocked",
-            { code: refCode },
-            { service },
-          );
+          // Tracking best-effort (ne casse jamais l'auth) : on journalise
+          // l'ARRIVÉE du filleul via un lien (referral_signup). Le crédit, lui,
+          // sera journalisé plus tard, au pointage de présence (referral_credited).
+          if (result.linked) {
+            void logEvent(
+              user.id,
+              "referral_signup",
+              { code: refCode },
+              { service },
+            );
+          }
         }
       } catch (referralErr) {
         // Le parrainage est secondaire : on ne casse pas la connexion pour ça.

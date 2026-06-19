@@ -30,6 +30,15 @@ vi.mock("@/lib/admin", () => ({
   requireAdmin: (...args: unknown[]) => requireAdminMock(...args),
 }));
 
+// Le déclencheur de crédit parrainage (anti-farming) est mocké : on vérifie
+// QU'IL EST APPELÉ (ou non) sur les bonnes transitions, sans rejouer sa propre
+// séquence DB (testée dans referral-lib.test.ts).
+const crediterParrainsMock = vi.fn();
+vi.mock("@/lib/referral", () => ({
+  crediterParrainsApresSeanceHonoree: (...args: unknown[]) =>
+    crediterParrainsMock(...args),
+}));
+
 let serviceMock: MockSupabase;
 vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: vi.fn(() => serviceMock.client),
@@ -43,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   serviceMock = makeSupabaseMock(null);
   requireAdminMock.mockResolvedValue({ userId: "admin-1", email: "alice@x.fr" });
+  crediterParrainsMock.mockResolvedValue(0);
 });
 
 describe("POST /api/admin/bookings/attendance", () => {
@@ -63,9 +73,9 @@ describe("POST /api/admin/bookings/attendance", () => {
     expect(res.status).toBe(404);
   });
 
-  it("'attended' → écrit attendance='attended' + horodatage", async () => {
+  it("'attended' (transition depuis non-renseigné) → écrit attendance + DÉCLENCHE le crédit parrainage", async () => {
     serviceMock.queueResult("bookings", "select", {
-      data: { id: "booking-1" },
+      data: { id: "booking-1", user_id: "filleul-9", attendance: null },
       error: null,
     });
     serviceMock.queueResult("bookings", "update", { data: null, error: null });
@@ -83,11 +93,46 @@ describe("POST /api/admin/bookings/attendance", () => {
     };
     expect(payload.attendance).toBe("attended");
     expect(typeof payload.attendance_marked_at).toBe("string");
+    // ANTI-FARMING : le crédit du parrain est déclenché pour le FILLEUL (user_id).
+    expect(crediterParrainsMock).toHaveBeenCalledWith(
+      serviceMock.client,
+      "filleul-9",
+    );
   });
 
-  it("'no_show' → écrit attendance='no_show'", async () => {
+  it("'attended' alors que DÉJÀ 'attended' → PAS de re-déclenchement du crédit", async () => {
     serviceMock.queueResult("bookings", "select", {
-      data: { id: "booking-1" },
+      data: { id: "booking-1", user_id: "filleul-9", attendance: "attended" },
+      error: null,
+    });
+    serviceMock.queueResult("bookings", "update", { data: null, error: null });
+    const { POST } = await import("@/app/api/admin/bookings/attendance/route");
+    const res = asMockResponse(
+      await POST(makeReq({ bookingId: "booking-1", attendance: "attended" })),
+    );
+    expect(res.status).toBe(200);
+    // Pas de transition → on ne re-déclenche pas (le crédit serait idempotent,
+    // mais on évite le travail inutile).
+    expect(crediterParrainsMock).not.toHaveBeenCalled();
+  });
+
+  it("le pointage reste 200 même si le crédit parrainage jette (best-effort)", async () => {
+    serviceMock.queueResult("bookings", "select", {
+      data: { id: "booking-1", user_id: "filleul-9", attendance: null },
+      error: null,
+    });
+    serviceMock.queueResult("bookings", "update", { data: null, error: null });
+    crediterParrainsMock.mockRejectedValue(new Error("boom"));
+    const { POST } = await import("@/app/api/admin/bookings/attendance/route");
+    const res = asMockResponse(
+      await POST(makeReq({ bookingId: "booking-1", attendance: "attended" })),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("'no_show' → écrit attendance='no_show', AUCUN crédit déclenché", async () => {
+    serviceMock.queueResult("bookings", "select", {
+      data: { id: "booking-1", user_id: "filleul-9", attendance: null },
       error: null,
     });
     serviceMock.queueResult("bookings", "update", { data: null, error: null });
@@ -100,11 +145,12 @@ describe("POST /api/admin/bookings/attendance", () => {
       (c) => c.table === "bookings" && c.op === "update",
     );
     expect((update?.payload as { attendance: string }).attendance).toBe("no_show");
+    expect(crediterParrainsMock).not.toHaveBeenCalled();
   });
 
-  it("'pending' → réinitialise (attendance=null, marked_at=null)", async () => {
+  it("'pending' → réinitialise (attendance=null, marked_at=null), AUCUN crédit", async () => {
     serviceMock.queueResult("bookings", "select", {
-      data: { id: "booking-1" },
+      data: { id: "booking-1", user_id: "filleul-9", attendance: "attended" },
       error: null,
     });
     serviceMock.queueResult("bookings", "update", { data: null, error: null });
@@ -120,6 +166,7 @@ describe("POST /api/admin/bookings/attendance", () => {
       attendance: null,
       attendance_marked_at: null,
     });
+    expect(crediterParrainsMock).not.toHaveBeenCalled();
   });
 });
 
