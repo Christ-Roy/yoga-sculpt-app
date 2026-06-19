@@ -23,9 +23,67 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreditReferral } from "@/lib/anti-abuse";
 import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
+import { sanitizeRefCode } from "@/lib/ref-code";
 import { createLogger } from "@/lib/log";
 
 const log = createLogger("referral");
+
+/**
+ * Résout le PRÉNOM du parrain à partir d'un code de parrainage — pour la landing
+ * d'invitation `/invitation?ref=<CODE>` (« {Prénom} vous a invité… »).
+ *
+ * Garde-fous (SÉCURITÉ / VIE PRIVÉE) :
+ *   - Le `code` est SANITISÉ (sanitizeRefCode) : format strict 8 chars de
+ *     l'alphabet non ambigu, MAJUSCULES. Tout code hors-norme → `null` (on ne
+ *     lance même pas la requête).
+ *   - SELECT BORNÉ à `full_name` UNIQUEMENT : on n'expose JAMAIS l'e-mail, le
+ *     téléphone, l'id ni aucune autre PII du parrain via cette route publique.
+ *   - On ne renvoie que le PREMIER token du nom (le prénom), pas le nom complet.
+ *   - Code inconnu, profil sans nom, ou erreur DB → `null` (la landing affiche
+ *     alors son titre de repli « Vous avez été invité(e)… »). Best-effort : ne
+ *     throw jamais (une page publique ne doit pas planter sur un lookup raté).
+ *
+ * @param service client `service_role` (bypass RLS) — la route est publique, la
+ *                table profiles est sous RLS ; on lit au nom du système, borné au
+ *                seul champ `full_name`.
+ * @param rawCode valeur brute du paramètre `?ref=` (non fiable).
+ * @returns le prénom du parrain, ou `null`.
+ */
+export async function prenomParrainParCode(
+  service: SupabaseClient,
+  rawCode: string | null | undefined,
+): Promise<string | null> {
+  const code = sanitizeRefCode(rawCode);
+  if (!code) return null;
+
+  try {
+    const { data, error } = await service
+      .from("profiles")
+      // ⚠️ Champ unique : full_name. Ne JAMAIS élargir ce select (pas d'email/tel).
+      .select("full_name")
+      .eq("referral_code", code)
+      .maybeSingle();
+
+    if (error) {
+      log.error("Résolution prénom parrain échouée", { db: error.message });
+      return null;
+    }
+
+    const fullName =
+      typeof data?.full_name === "string" ? data.full_name.trim() : "";
+    if (!fullName) return null;
+
+    // Premier token = prénom (on ne renvoie pas le nom de famille).
+    const prenom = fullName.split(/\s+/)[0] ?? "";
+    return prenom || null;
+  } catch (err) {
+    // Page PUBLIQUE : un lookup raté ne doit jamais la faire planter en 500.
+    log.error("Exception résolution prénom parrain", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
 
 /**
  * Plafond EFFECTIF de parrainages crédités par parrain (anti-farming).

@@ -45,6 +45,7 @@ export type EventType =
   | "referral_signup"
   | "referral_credited"
   | "referral_blocked"
+  | "invitation_landing_view"
   | "booking_created"
   | "booking_cancelled"
   | "booking_attended"

@@ -34,6 +34,58 @@ test("arrivée via ?ref=CODE : le code est capté en cookies (ys_ref / ys_ref_pu
   expect(refPub?.httpOnly).toBe(false);
 });
 
+test("landing /invitation?ref=CODE : titre personnalisé avec le prénom du parrain + bloc auth", async ({
+  page,
+  testUser,
+}) => {
+  // On fait du `testUser` un PARRAIN nommé avec un code de parrainage stable.
+  const CODE = "EMMA2345";
+  const PRENOM = "Emma";
+  const { error } = await admin()
+    .from("profiles")
+    .update({ referral_code: CODE, full_name: `${PRENOM} Durand` })
+    .eq("id", testUser.id);
+  expect(error).toBeNull();
+
+  // Le filleul (anonyme, pas de session) arrive sur la landing d'invitation.
+  await page.goto(`/invitation?ref=${CODE}`);
+  await expect(page).toHaveURL(/\/invitation/);
+
+  // Titre d'accueil personnalisé : « {Prénom} vous a invité(e)… ».
+  await expect(
+    page.getByRole("heading", { name: new RegExp(`${PRENOM}.*vous a invit`, "i") }),
+  ).toBeVisible();
+
+  // L'accroche communautaire est présente.
+  await expect(page.getByText(/plus sympa entre ami/i)).toBeVisible();
+
+  // Le BLOC AUTH intégré est là (Google + magic-link), pas un détour par /login.
+  await expect(
+    page.getByRole("button", { name: /continuer avec google/i }),
+  ).toBeVisible();
+  await expect(page.getByPlaceholder(/exemple\.com/i)).toBeVisible();
+
+  // Le cookie de parrainage a bien été posé par le middleware sur /invitation.
+  const cookies = await page.context().cookies();
+  expect(cookies.find((c) => c.name === "ys_ref")?.value).toBe(CODE);
+  expect(cookies.find((c) => c.name === "ys_ref_pub")?.value).toBe(CODE);
+});
+
+test("landing /invitation sans code (ou code inconnu) : titre de repli + bloc auth", async ({
+  page,
+}) => {
+  // Code bien formé mais inconnu → fallback (« Vous avez été invité(e)… »).
+  await page.goto(`/invitation?ref=ZZZZ9999`);
+  await expect(page).toHaveURL(/\/invitation/);
+
+  await expect(
+    page.getByRole("heading", { name: /vous avez été invit/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /continuer avec google/i }),
+  ).toBeVisible();
+});
+
 test("page parrainer : un membre connecté voit son code de parrainage", async ({
   page,
   testUser,

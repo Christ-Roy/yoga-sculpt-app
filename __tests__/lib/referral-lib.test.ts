@@ -116,6 +116,98 @@ describe("getOrCreateCode — collision unique", () => {
   });
 });
 
+describe("prenomParrainParCode — landing d'invitation (lookup borné, no PII)", () => {
+  it("code valide + nom complet → renvoie le PRÉNOM (1er token)", async () => {
+    service.queueResult("profiles", "select", {
+      data: { full_name: "Emma Durand" },
+      error: null,
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(await prenomParrainParCode(service.client as never, "ABCD2345")).toBe(
+      "Emma",
+    );
+  });
+
+  it("tolère un nom à espaces multiples / bordés (trim + 1er token)", async () => {
+    service.queueResult("profiles", "select", {
+      data: { full_name: "  Marie-Claire  De La Tour " },
+      error: null,
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(await prenomParrainParCode(service.client as never, "abcd2345")).toBe(
+      "Marie-Claire",
+    );
+  });
+
+  it("normalise le code (casse/espaces) avant le lookup", async () => {
+    service.queueResult("profiles", "select", {
+      data: { full_name: "Léa Martin" },
+      error: null,
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(await prenomParrainParCode(service.client as never, "  abcd2345 ")).toBe(
+      "Léa",
+    );
+    // Le SELECT est borné à `full_name` UNIQUEMENT (jamais d'email/tél/id).
+    const sel = service.calls.find(
+      (c) => c.table === "profiles" && c.op === "select",
+    );
+    expect(sel).toBeDefined();
+  });
+
+  it("code inconnu (aucun profil) → null", async () => {
+    service.queueResult("profiles", "select", { data: null, error: null });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(
+      await prenomParrainParCode(service.client as never, "ZZZZ9999"),
+    ).toBeNull();
+  });
+
+  it("profil trouvé mais SANS nom (full_name null) → null (fallback landing)", async () => {
+    service.queueResult("profiles", "select", {
+      data: { full_name: null },
+      error: null,
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(
+      await prenomParrainParCode(service.client as never, "ABCD2345"),
+    ).toBeNull();
+  });
+
+  it("full_name vide / espaces → null", async () => {
+    service.queueResult("profiles", "select", {
+      data: { full_name: "   " },
+      error: null,
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(
+      await prenomParrainParCode(service.client as never, "ABCD2345"),
+    ).toBeNull();
+  });
+
+  it("code INVALIDE (hors alphabet / mauvaise longueur) → null SANS toucher la DB", async () => {
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    for (const bad of ["", "abc", "0O1ILo!!", "ABCD234", "ABCD23456", null, undefined]) {
+      expect(
+        await prenomParrainParCode(service.client as never, bad as never),
+      ).toBeNull();
+    }
+    // Aucune requête n'a été lancée pour ces codes hors-norme (rejet précoce).
+    expect(service.calls.length).toBe(0);
+  });
+
+  it("erreur DB → null (fail-safe, ne throw pas)", async () => {
+    service.queueResult("profiles", "select", {
+      data: null,
+      error: { message: "permission denied" },
+    });
+    const { prenomParrainParCode } = await import("@/lib/referral");
+    expect(
+      await prenomParrainParCode(service.client as never, "ABCD2345"),
+    ).toBeNull();
+  });
+});
+
 describe("completerReferral — fail-safes & idempotence concurrente", () => {
   const base = {
     code: CODE,

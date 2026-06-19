@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentUser } from "@/lib/auth";
 import { AuthBackground } from "@/components/AuthBackground";
 import { sanitizeOnboardingDraft } from "@/lib/onboarding";
+import { prenomParrainParCode } from "@/lib/referral";
 import { OnboardingFlow } from "./OnboardingFlow";
 
 export const metadata: Metadata = {
@@ -50,6 +53,22 @@ export default async function OnboardingPage() {
     phone: profile?.phone ?? null,
   };
 
+  // Rappel discret du contexte d'invitation : si le filleul est arrivé via un
+  // lien de parrainage, le cookie `ys_ref_pub` (posé par le middleware) porte le
+  // code. On RE-RÉSOUT le prénom du parrain côté serveur (lookup borné, jamais de
+  // PII) pour afficher « Invité(e) par {Prénom} » en tête. Best-effort : tout
+  // échec → pas de badge, jamais d'impact sur le flow d'onboarding.
+  let invitedBy: string | null = null;
+  try {
+    const cookieStore = await cookies();
+    const refCode = cookieStore.get("ys_ref_pub")?.value;
+    if (refCode) {
+      invitedBy = await prenomParrainParCode(createServiceClient(), refCode);
+    }
+  } catch {
+    invitedBy = null;
+  }
+
   return (
     <main className="relative flex min-h-dvh items-center justify-center px-5 py-6 sm:py-12">
       <AuthBackground />
@@ -58,6 +77,7 @@ export default async function OnboardingPage() {
           firstName={firstName}
           prefill={prefill}
           initialDraft={initialDraft}
+          invitedBy={invitedBy}
         />
       </div>
     </main>

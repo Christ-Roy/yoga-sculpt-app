@@ -77,11 +77,18 @@ export function OnboardingFlow({
   firstName,
   prefill,
   initialDraft,
+  invitedBy,
 }: {
   firstName?: string | null;
   prefill: BookingPrefill;
   /** Brouillon de reprise chargé côté serveur (profiles.onboarding_draft). */
   initialDraft?: OnboardingDraft | null;
+  /**
+   * Prénom du parrain (si le filleul est arrivé via un lien d'invitation,
+   * cookie `ys_ref_pub` re-résolu côté serveur). Affiché en rappel discret en
+   * tête de l'onboarding. `null`/absent → pas de badge (parcours normal).
+   */
+  invitedBy?: string | null;
 }) {
   const router = useRouter();
   // Index de la question courante — repris du brouillon (déjà borné côté serveur).
@@ -207,6 +214,17 @@ export function OnboardingFlow({
     </div>
   );
 
+  // Rappel discret du contexte d'invitation (parrainage), si présent. Purement
+  // informatif — ne change RIEN au flow 6 étapes ni à la reprise du brouillon.
+  const InviteBadge = invitedBy ? (
+    <div className="mb-5 flex items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-4 py-2 text-sm text-text-secondary">
+      <Gift className="h-4 w-4 shrink-0 text-accent" strokeWidth={1.7} aria-hidden />
+      <span>
+        Invité(e) par <span className="text-accent">{invitedBy}</span>
+      </span>
+    </div>
+  ) : null;
+
   // ───────────────── Étape 5 : Inviter un(e) ami(e) (page dédiée) ───────────
   if (phase === "invite") {
     return (
@@ -328,6 +346,7 @@ export function OnboardingFlow({
   return (
     <div className="w-full max-w-lg sm:max-w-2xl lg:max-w-3xl">
       {Header}
+      {InviteBadge}
 
       {/* Question (re-montée à chaque étape via key → animation) */}
       <div key={step.key} className="animate-fade-in-up">

@@ -56,10 +56,17 @@ export async function updateSession(request: NextRequest) {
   // `requireAdmin()` reste la vraie barrière — un non-admin connecté est
   // redirigé vers /espace par la page elle-même ; le middleware évite juste
   // à un visiteur non connecté d'atteindre la page admin).
+  // Routes PROTÉGÉES (auth requise → redirection /login si pas de session).
+  // `/invitation` en est volontairement ABSENTE : c'est une landing PUBLIQUE
+  // (le 1er écran d'un filleul, qui vient justement se créer un compte ici).
   const isProtected =
     pathname.startsWith("/espace") ||
     pathname.startsWith("/onboarding") ||
     pathname.startsWith("/admin");
+  // Seul /login renvoie un utilisateur DÉJÀ connecté vers l'app. `/invitation`
+  // NE doit PAS faire ça : un filleul qui vient de s'authentifier doit pouvoir
+  // enchaîner sur l'onboarding via /auth/callback — on le laisse simplement
+  // passer (ni protection, ni redirection forcée).
   const isAuthPage = pathname === "/login";
 
   // Not logged in + trying to reach a protected route → /login
