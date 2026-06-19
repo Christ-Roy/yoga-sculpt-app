@@ -174,6 +174,94 @@ export async function grantTickets(
   if (error) throw new Error(`[e2e] grantTickets : ${error.message}`);
 }
 
+/**
+ * Sème un ticket DÉJÀ CONSOMMÉ (quantite_initiale=1, quantite_restante=0) + un
+ * booking `confirmed` qui le lie, AU FORMAT DB exact — la mise en condition du
+ * cycle d'annulation, sans rejouer toute la réservation Google.
+ *
+ * Renvoie `{ bookingId, ticketId }`. On contrôle `startsAt` à la seconde près :
+ * c'est la VARIABLE du test (>24h → restitution autorisée, <24h → refusée). Le
+ * `google_event_id` est un placeholder `pending-e2e-…` → la route `/api/annuler`
+ * NE touche PAS l'agenda Google (elle ignore les ids `pending-`), donc le test
+ * reste hermétique aux aléas réseau/quota Google : on valide la VÉRITÉ MÉTIER
+ * (statut booking + recrédit ticket), pas l'effet de bord agenda.
+ */
+export async function seedConsumedBooking(
+  userId: string,
+  opts: {
+    type: "collectif" | "particulier";
+    startsAt: Date;
+    /** Durée du créneau (défaut 60 min). */
+    durationMinutes?: number;
+  },
+): Promise<{ bookingId: string; ticketId: string }> {
+  const startsAt = opts.startsAt.toISOString();
+  const endsAt = new Date(
+    opts.startsAt.getTime() + (opts.durationMinutes ?? 60) * 60_000,
+  ).toISOString();
+
+  // Ticket consommé : initiale=1, restante=0 → après annulation >24h on attend 1.
+  const { data: ticketRow, error: ticketErr } = await admin()
+    .from("tickets")
+    .insert({
+      user_id: userId,
+      type: opts.type,
+      quantite_initiale: 1,
+      quantite_restante: 0,
+      source: "e2e-seed",
+    })
+    .select("id")
+    .single();
+  if (ticketErr || !ticketRow) {
+    throw new Error(`[e2e] seedConsumedBooking ticket : ${ticketErr?.message}`);
+  }
+  const ticketId = ticketRow.id as string;
+
+  // Booking confirmé lié au ticket. google_event_id `pending-e2e-…` (jamais créé
+  // dans Google) → annuler() saute la partie agenda.
+  const rand = Math.random().toString(36).slice(2, 10);
+  const { data: bookingRow, error: bookingErr } = await admin()
+    .from("bookings")
+    .insert({
+      user_id: userId,
+      type: opts.type,
+      google_event_id: `pending-e2e-${rand}`,
+      google_calendar_creneau_id: null,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      status: "confirmed",
+      ticket_id: ticketId,
+    })
+    .select("id")
+    .single();
+  if (bookingErr || !bookingRow) {
+    throw new Error(`[e2e] seedConsumedBooking booking : ${bookingErr?.message}`);
+  }
+  return { bookingId: bookingRow.id as string, ticketId };
+}
+
+/** Statut courant d'un booking précis ('confirmed' | 'cancelled' | null si absent). */
+export async function bookingStatus(bookingId: string): Promise<string | null> {
+  const { data, error } = await admin()
+    .from("bookings")
+    .select("status")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (error) throw new Error(`[e2e] bookingStatus : ${error.message}`);
+  return (data?.status as string | undefined) ?? null;
+}
+
+/** `quantite_restante` d'un ticket précis (pour vérifier le recrédit à l'annulation). */
+export async function ticketRestante(ticketId: string): Promise<number> {
+  const { data, error } = await admin()
+    .from("tickets")
+    .select("quantite_restante")
+    .eq("id", ticketId)
+    .maybeSingle();
+  if (error) throw new Error(`[e2e] ticketRestante : ${error.message}`);
+  return Number(data?.quantite_restante ?? NaN);
+}
+
 /** Nombre de bookings confirmés d'un user (pour vérifier une réservation). */
 export async function confirmedBookings(userId: string): Promise<number> {
   const { count, error } = await admin()
