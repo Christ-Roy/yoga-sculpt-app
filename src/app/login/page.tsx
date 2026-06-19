@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
+import { AuthBackground } from "@/components/AuthBackground";
 import { LoginForm } from "./LoginForm";
 
 export const metadata: Metadata = {
@@ -21,8 +22,9 @@ export default async function LoginPage({
   // (« Cookies can only be modified in a Server Action or Route Handler »).
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-5 py-12">
-      <div className="w-full max-w-sm animate-fade-in-up">
+    <main className="relative flex min-h-dvh items-center justify-center px-5 py-12">
+      <AuthBackground variant="photo" />
+      <div className="relative z-10 w-full max-w-sm animate-fade-in-up">
         {/* Logo */}
         <div className="mb-10 flex flex-col items-center text-center">
           <Logo title="Yoga Sculpt — connexion" />

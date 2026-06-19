@@ -1,4 +1,5 @@
 import { Logo } from "@/components/Logo";
+import { AuthBackground } from "@/components/AuthBackground";
 import { ConfirmClient } from "./ConfirmClient";
 import { safeInternalRedirect } from "@/lib/auth-redirect";
 
@@ -38,9 +39,10 @@ export default async function ConfirmPage({
   const redirectTo = safeInternalRedirect(sp.redirectTo, "/espace");
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-bg px-5 py-10">
-      <Logo title="Yoga Sculpt — confirmation" />
-      <div className="mt-8 w-full max-w-sm rounded-[4px] border border-border bg-surface/60 p-8 text-center">
+    <main className="relative flex min-h-screen flex-col items-center justify-center bg-bg px-5 py-10">
+      <AuthBackground variant="photo" />
+      <Logo title="Yoga Sculpt — confirmation" className="relative z-10" />
+      <div className="relative z-10 mt-8 w-full max-w-sm rounded-[4px] border border-border bg-surface/60 p-8 text-center backdrop-blur-sm">
         <ConfirmClient
           tokenHash={tokenHash}
           type={type}
