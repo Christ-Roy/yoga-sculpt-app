@@ -285,6 +285,38 @@ describe("POST /api/parrainage/completer", () => {
       serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
     ).toBeUndefined();
   });
+
+  it("200 SILENCIEUX si le PLAFOND de parrainages est atteint — aucun ticket (anti-farming)", async () => {
+    serviceMock.queueResult("account_signals", "select", { data: null, error: null });
+    serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
+    // Parrain résolu.
+    serviceMock.queueResult("profiles", "select", {
+      data: { id: PARRAIN_ID },
+      error: null,
+    });
+    // R4 : ce filleul n'a jamais été crédité (liste vide) → anti-abus OK.
+    serviceMock.queueResult("referrals", "select", { data: [], error: null });
+    // Pas de referral pending existant.
+    serviceMock.queueResult("referrals", "select", { data: null, error: null });
+    // Création du referral à la volée → id.
+    serviceMock.queueResult("referrals", "insert", {
+      data: { id: "ref-new" },
+      error: null,
+    });
+    // 5bis PLAFOND : le parrain a DÉJÀ 3 filleuls crédités (count = défaut 3) →
+    // on ne crédite plus (anti-farming). Le filleul reste rattaché, pas de ticket.
+    serviceMock.queueResult("referrals", "select", { data: null, error: null, count: 3 });
+
+    const { POST } = await import("@/app/api/parrainage/completer/route");
+    const res = asMockResponse(await POST(makeReq({ code: CODE })));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    // Plafond atteint → AUCUN ticket crédité.
+    expect(
+      serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
+    ).toBeUndefined();
+  });
 });
 
 describe("GET /api/parrainage/completer", () => {

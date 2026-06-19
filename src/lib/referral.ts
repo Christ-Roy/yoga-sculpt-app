@@ -22,6 +22,28 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canCreditReferral } from "@/lib/anti-abuse";
+import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
+
+/**
+ * Plafond EFFECTIF de parrainages crédités par parrain (anti-farming).
+ *
+ * Lit la surcharge d'environnement `REFERRAL_MAX_CREDITS` si elle est un entier
+ * positif valide, sinon retombe sur le défaut métier (`PARRAINAGE_MAX_DEFAUT`).
+ * Permet d'ajuster le plafond (durcir / desserrer) sans redéploiement de code.
+ *
+ * C'est la SEULE source de vérité du plafond appliqué au crédit (cf.
+ * `completerReferral`). Les écrans UI n'utilisent que le défaut comme repère.
+ */
+export function maxParrainagesCredites(): number {
+  const brut = process.env.REFERRAL_MAX_CREDITS;
+  if (brut !== undefined) {
+    const n = Number.parseInt(brut, 10);
+    // On n'accepte qu'un entier strictement positif ; toute valeur douteuse
+    // (vide, négative, non numérique) → on garde le défaut sûr.
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return PARRAINAGE_MAX_DEFAUT;
+}
 
 /**
  * Alphabet du code de parrainage : sans caractères ambigus (pas de 0/O, 1/I/L)
@@ -291,9 +313,11 @@ export async function completerReferral(
     referralId = created.id as string;
   }
 
-  // 5bis) PLAFOND : un parrain est crédité au maximum 3 fois (1 ticket par
-  // filleul, jusqu'à 3 filleuls). Au-delà, on lie le filleul pour la traçabilité
-  // mais on ne crédite plus. (count exact via head:true)
+  // 5bis) PLAFOND (anti-farming) : un parrain est crédité au maximum
+  // `maxParrainagesCredites()` fois (1 ticket par filleul). Au-delà, on lie le
+  // filleul pour la traçabilité mais on ne crédite plus. Plafond configurable via
+  // `REFERRAL_MAX_CREDITS` (défaut métier 3). (count exact via head:true)
+  const plafond = maxParrainagesCredites();
   const { count: dejaCredites, error: countErr } = await service
     .from("referrals")
     .select("id", { count: "exact", head: true })
@@ -303,10 +327,17 @@ export async function completerReferral(
     console.error("[referral] Comptage plafond parrain échoué :", countErr.message);
     return { credited: false };
   }
-  if ((dejaCredites ?? 0) >= 3) {
+  if ((dejaCredites ?? 0) >= plafond) {
     // Plafond atteint : on ne crédite plus, mais le filleul reste rattaché.
     return { credited: false };
   }
+
+  // TODO(anti-abus): créditer après la 1ère séance HONORÉE du filleul (booking
+  // passé + bookings.attendance='attended') plutôt qu'à l'inscription (cf. todo
+  // 2026-06-19-qa-secu-parrainage-anti-abus-farmable, levier 1). C'est le levier
+  // qui tue le farming (un faux compte ne va pas en cours), mais il déplace le
+  // déclencheur du crédit vers le cron d'attendance → recâblage non trivial,
+  // laissé hors de ce commit pour ne pas fragiliser le flux d'inscription.
 
   // 6) Créditer le ticket au parrain, PUIS marquer le referral (ordre choisi
   // pour ne jamais marquer « crédité » sans ticket réel). On verrouille la

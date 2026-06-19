@@ -26,6 +26,12 @@ import { vi } from "vitest";
 export interface SupabaseResult<T = unknown> {
   data: T;
   error: { code?: string; message: string } | null;
+  /**
+   * Nombre de lignes — présent quand le code appelle `.select(col, { count })`
+   * (ex. garde de plafond parrainage). Optionnel : la plupart des requêtes ne
+   * le renvoient pas.
+   */
+  count?: number | null;
 }
 
 /**

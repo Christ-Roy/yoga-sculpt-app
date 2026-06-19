@@ -5,9 +5,7 @@ import { usePathname } from "next/navigation";
 import { CalendarPlus, Gift, Home, LogOut, Ticket } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
-/** Nombre max de tickets gagnables par parrainage (1 par filleul, plafond 3). */
-const PARRAINAGE_MAX = 3;
-
+import { PARRAINAGE_MAX_DEFAUT } from "@/lib/referral-config";
 import { Logo } from "@/components/Logo";
 import { signOut } from "@/app/login/actions";
 import {
@@ -55,7 +53,7 @@ export function AppSidebar({ userLabel }: { userLabel: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (annule || !d) return;
-        const restant = PARRAINAGE_MAX - (d.ticketsGagnes ?? 0);
+        const restant = PARRAINAGE_MAX_DEFAUT - (d.ticketsGagnes ?? 0);
         setTicketsAGagner(Math.max(0, restant));
       })
       .catch(() => {});

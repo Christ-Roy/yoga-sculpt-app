@@ -16,6 +16,7 @@ import { ReserverWidget } from "@/components/espace/ReserverWidget";
 import { ParrainageWidget } from "@/components/espace/ParrainageWidget";
 import { WelcomeTicketBanner } from "@/components/espace/WelcomeTicketBanner";
 import { resoudreLieuxParEvent } from "@/lib/booking-lieu";
+import { maxParrainagesCredites } from "@/lib/referral";
 
 export const metadata: Metadata = {
   title: "Mon espace — Yoga Sculpt",
@@ -80,14 +81,15 @@ export default async function EspacePage() {
   const solde = calculerSolde((tickets ?? []) as LigneSolde[]);
 
   // Bannière parrainage : affichée tant qu'il reste des séances offertes à
-  // gagner (le parrain est crédité 1 ticket/filleul, plafond 3). On pousse le
-  // parrainage tant que < 3 filleuls ont été crédités.
+  // gagner (le parrain est crédité 1 ticket/filleul, plafond = celui appliqué au
+  // serveur via maxParrainagesCredites — plus de magie « 3 » dupliquée ici).
   const { count: filleulsCredites } = await supabase
     .from("referrals")
     .select("id", { count: "exact", head: true })
     .eq("parrain_user_id", user.id)
     .eq("ticket_credite", true);
-  const resteSeancesAGagner = (filleulsCredites ?? 0) < 3;
+  const resteSeancesAGagner =
+    (filleulsCredites ?? 0) < maxParrainagesCredites();
 
   // ── Séances confirmées à venir (RLS user-scopée). ──────────────────────────
   const { data: bookingRows } = await supabase
