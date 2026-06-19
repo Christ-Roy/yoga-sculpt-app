@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 import { sanitizeRefCode } from "@/lib/ref-code";
+import { appliquerHeadersSecurite } from "@/lib/security-headers";
 
 /**
  * Durée de vie des cookies de parrainage (30 min) — couvre une inscription
@@ -70,6 +71,11 @@ export async function middleware(request: NextRequest) {
   // Capte un éventuel `?ref=` (lien de parrainage) et pose les cookies sur la
   // réponse — jamais dans le render de la page (cf. deposerCookieParrainage).
   deposerCookieParrainage(request, response);
+  // En-têtes de sécurité (HSTS / X-Frame / nosniff / Referrer / Permissions +
+  // CSP en report-only) posés globalement ici — c'est la seule couche traversée
+  // par TOUTES les routes/pages sur ce runtime (Workers/OpenNext n'évalue pas
+  // `next.config.ts#headers()` au build d'un export edge). Cf. security-headers.ts.
+  appliquerHeadersSecurite(response.headers);
   return response;
 }
 
