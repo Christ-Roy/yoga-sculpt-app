@@ -2,9 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getOrCreateCode, normaliserEmail } from "@/lib/referral";
+import {
+  getOrCreateCode,
+  normaliserEmail,
+  parrainPublicParCode,
+  type ParrainPublic,
+} from "@/lib/referral";
 import { isDisposableEmail } from "@/lib/anti-abuse";
-import { renderEmail, textFromBlocks, escapeHtml } from "@/lib/email-templates";
+import {
+  renderEmail,
+  renderBlocParrain,
+  textFromBlocks,
+  escapeHtml,
+} from "@/lib/email-templates";
 import { logEvent } from "@/lib/events";
 import { createLogger, serializeError } from "@/lib/log";
 
@@ -138,12 +148,41 @@ export async function POST(request: Request) {
     );
   }
 
+  // ── Profil PUBLIC du parrain (avatar + prénom + e-mail) pour le mail. ───────
+  // On réutilise EXACTEMENT le lookup de la landing /invitation
+  // (parrainPublicParCode) → cohérence du bloc parrain entre la page et l'email.
+  // Best-effort TOTAL : ne throw jamais (la fonction est elle-même best-effort) ;
+  // un profil/avatar absent retombera sur le nom seul côté template.
+  let parrain: ParrainPublic = { prenom: null, avatarUrl: null, email: null };
+  try {
+    parrain = await parrainPublicParCode(service, code);
+  } catch (err) {
+    // Lookup raté → on garde le profil vide, l'invitation part avec le nom seul.
+    log.error("Lookup profil parrain échoué (non bloquant)", {
+      err: serializeError(err),
+    });
+  }
+  // Filet : si le lookup n'a pas résolu de prénom (profil sans nom, course de
+  // création…), on retombe sur le nom des claims OAuth, comme avant.
+  if (!parrain.prenom) {
+    const nomClaims =
+      (user.user_metadata?.full_name as string | undefined) ??
+      (user.user_metadata?.name as string | undefined) ??
+      null;
+    if (nomClaims) {
+      // 1er token = prénom (cohérent avec parrainPublicParCode / la landing).
+      parrain = {
+        ...parrain,
+        prenom: nomClaims.trim().split(/\s+/)[0] || null,
+        // E-mail de repli : celui du parrain authentifié (décision Robert : OK
+        // d'afficher l'e-mail du parrain en clair, cf. /invitation).
+        email: parrain.email ?? user.email ?? null,
+      };
+    }
+  }
+
   // ── Envoi de l'e-mail d'invitation (best-effort, non bloquant). ─────────────
-  const parrainNom =
-    (user.user_metadata?.full_name as string | undefined) ??
-    (user.user_metadata?.name as string | undefined) ??
-    null;
-  await envoyerInvitation({ filleulEmail: email, code, parrainNom }).catch(
+  await envoyerInvitation({ filleulEmail: email, code, parrain }).catch(
     (err) => {
       // L'invitation est enregistrée : un échec d'e-mail ne doit pas la perdre.
       log.error("Envoi e-mail échoué (non bloquant)", { err: serializeError(err) });
@@ -164,7 +203,7 @@ export async function POST(request: Request) {
 async function envoyerInvitation(params: {
   filleulEmail: string;
   code: string;
-  parrainNom: string | null;
+  parrain: ParrainPublic;
 }): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.yoga-sculpt.fr";
@@ -185,32 +224,54 @@ async function envoyerInvitation(params: {
   }
 
   const lien = `${appUrl}/login?ref=${encodeURIComponent(params.code)}`;
-  // Texte brut (pour la version texte + interpolation HTML échappée).
-  const deLaPart = params.parrainNom ? ` de la part de ${params.parrainNom}` : "";
-  // Variante HTML : le nom du parrain (donnée utilisateur) doit être échappé.
-  const deLaPartHtml = params.parrainNom
-    ? ` de la part de <strong>${escapeHtml(params.parrainNom)}</strong>`
+
+  // ── Profil parrain : bloc visuel (avatar + prénom + e-mail) + formulations. ──
+  const prenom = params.parrain.prenom?.trim() || null;
+  const parrainEmail = params.parrain.email?.trim() || null;
+  // Bloc HTML « {Prénom} vous invite » avec avatar (ou "" si parrain non résolu).
+  const blocParrainHtml = renderBlocParrain({
+    prenom,
+    email: parrainEmail,
+    avatarUrl: params.parrain.avatarUrl,
+  });
+  // Texte brut (pour la version texte + interpolation HTML échappée du paragraphe).
+  const deLaPart = prenom ? ` de la part de ${prenom}` : "";
+  // Variante HTML : le prénom (donnée utilisateur) doit être échappé.
+  const deLaPartHtml = prenom
+    ? ` de la part de <strong>${escapeHtml(prenom)}</strong>`
     : "";
+  // Préheader : « {Prénom} vous invite… » si on connaît le parrain, sinon générique.
+  const preheader = prenom
+    ? `${prenom} vous invite à découvrir Yoga Sculpt.`
+    : "Une invitation à découvrir Yoga Sculpt vous attend.";
 
   const subject = `Un ami vous offre une séance de Yoga Sculpt 🎁`;
 
   const corpsHtml = `
     <p style="margin:0 0 12px;">Bonjour,</p>
+    ${blocParrainHtml}
     <p style="margin:0 0 12px;">Vous avez reçu une invitation${deLaPartHtml} à découvrir
     <strong>Yoga Sculpt</strong>, cours de yoga et pilates à Lyon.</p>
     <p style="margin:0;">Créez votre compte pour en profiter — on vous attend sur le tapis !</p>
   `;
   const { html: htmlContent } = renderEmail({
-    preheader: "Une invitation à découvrir Yoga Sculpt vous attend.",
+    preheader,
     titre: "Un ami vous offre une séance 🎁",
     corpsHtml,
     cta: { label: "Découvrir Yoga Sculpt", url: lien },
     footerNote:
       "Vous recevez cet email car un membre vous a invité·e à rejoindre Yoga Sculpt.",
   });
+  // Version texte : « {Prénom} (email) vous invite » si parrain résolu.
+  const ligneParrainTexte = prenom
+    ? parrainEmail
+      ? `${prenom} (${parrainEmail}) vous invite à découvrir Yoga Sculpt.`
+      : `${prenom} vous invite à découvrir Yoga Sculpt.`
+    : null;
   const textContent = textFromBlocks([
     "Bonjour,",
     "",
+    ...(ligneParrainTexte ? [ligneParrainTexte, ""] : []),
     `Vous êtes invité·e${deLaPart} à découvrir Yoga Sculpt (yoga & pilates à Lyon).`,
     "",
     `Créer votre compte : ${lien}`,

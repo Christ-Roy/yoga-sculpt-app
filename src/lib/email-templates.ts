@@ -219,3 +219,82 @@ export function renderEmail(params: RenderEmailParams): { html: string } {
 export function textFromBlocks(lignes: string[]): string {
   return lignes.join("\n");
 }
+
+// ============================================================================
+// Bloc « profil parrain » (réutilisable — email d'invitation parrainage)
+// ============================================================================
+
+/** Profil public du parrain à afficher dans le bloc d'invitation. */
+export interface BlocParrainParams {
+  /** Prénom du parrain (1er token du nom). Échappé au rendu. */
+  prenom: string | null;
+  /** E-mail complet du parrain (affichage validé par Robert). Échappé. */
+  email: string | null;
+  /**
+   * URL de l'avatar OAuth (Google/Microsoft), image distante http(s). `null` →
+   * fallback initiale. L'appelant doit garantir une URL http(s) sûre (le lookup
+   * `parrainPublicParCode` le fait déjà : pas de data:/javascript:).
+   */
+  avatarUrl?: string | null;
+}
+
+/**
+ * Rend le bloc « profil parrain » du mail d'invitation — médaillon avatar (cercle
+ * bordé or) + « {Prénom} vous invite » + e-mail en clair sous le prénom. Pendant
+ * email de la carte parrain de la landing `/invitation`.
+ *
+ * Contraintes EMAIL (Outlook/Gmail) :
+ *   - Tables + styles INLINE uniquement (PAS de flex/grid).
+ *   - Avatar = `<img>` distant rond (border-radius + Outlook : le rond peut
+ *     dégrader en carré sur de vieux clients, c'est acceptable). Dimensions
+ *     fixes 64×64 + `referrerpolicy="no-referrer"`.
+ *   - Avatar absent → cellule 64×64 fond surface + initiale or (Anton).
+ *   - Toutes les valeurs dynamiques (prénom, e-mail) sont ÉCHAPPÉES ici.
+ *
+ * Best-effort : si `prenom` est vide/`null` → renvoie `""` (l'appelant retombe
+ * sur la formulation générique « un membre vous invite », jamais d'email cassé).
+ *
+ * @returns un fragment HTML (string) à injecter dans `corpsHtml`, ou `""`.
+ */
+export function renderBlocParrain(params: BlocParrainParams): string {
+  const prenom = params.prenom?.trim() || "";
+  if (!prenom) return ""; // Pas de parrain résolu → bloc omis (best-effort).
+
+  const c = COULEURS;
+  const email = params.email?.trim() || "";
+  const avatarUrl =
+    typeof params.avatarUrl === "string" && /^https?:\/\//i.test(params.avatarUrl)
+      ? params.avatarUrl
+      : null;
+  const initiale = prenom.charAt(0).toUpperCase();
+
+  // Médaillon avatar : image distante ronde, ou initiale or sur fond surface.
+  const avatarCell = avatarUrl
+    ? `<img src="${avatarUrl}" alt="" width="64" height="64" referrerpolicy="no-referrer" style="display:block;width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid ${c.gold};background:${c.ink};" />`
+    : `<table role="presentation" cellpadding="0" cellspacing="0" style="width:64px;height:64px;border-radius:50%;border:2px solid ${c.gold};background:${c.ink};">
+         <tr><td align="center" valign="middle" style="width:64px;height:64px;font-family:${FONT_TITRE};font-size:28px;line-height:1;color:${c.gold};">${escapeHtml(
+           initiale,
+         )}</td></tr>
+       </table>`;
+
+  // Ligne e-mail sous le prénom (optionnelle).
+  const emailHtml = email
+    ? `<div style="margin-top:2px;font-family:${FONT_CORPS};font-size:13px;line-height:1.4;color:${c.muted};word-break:break-all;">${escapeHtml(
+        email,
+      )}</div>`
+    : "";
+
+  // Bloc : avatar (gauche) + textes (droite), aligné en table (pas de flex).
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:4px auto 20px;border:1px solid ${c.border};border-radius:6px;background:${c.ink};">
+      <tr>
+        <td style="padding:14px 18px;" valign="middle">${avatarCell}</td>
+        <td style="padding:14px 18px 14px 0;" valign="middle">
+          <div style="font-family:${FONT_CORPS};font-size:15px;line-height:1.4;color:${c.paper};"><strong style="color:${c.paper};font-weight:600;">${escapeHtml(
+            prenom,
+          )}</strong> vous invite</div>
+          ${emailHtml}
+        </td>
+      </tr>
+    </table>`;
+}
