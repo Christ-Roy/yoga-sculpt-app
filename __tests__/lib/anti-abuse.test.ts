@@ -133,11 +133,28 @@ describe("canCreditReferral", () => {
     expect(ok).toBe(false);
   });
 
-  it("R2 : IP partagée avec un AUTRE compte → refus", async () => {
+  it("R2 : 1 SEUL autre compte sur la même IP → AUTORISÉ (colocs/famille, max 2/IP)", async () => {
     svc.queueResult("referrals", "select", { data: [], error: null }); // R4 OK
-    // R2 : un autre compte a la même IP.
+    // R2 : un seul autre compte même IP → on autorise (2e compte de la maison).
     svc.queueResult("account_signals", "select", {
       data: [{ user_id: "autre-compte" }],
+      error: null,
+    });
+
+    const ok = await canCreditReferral(asClient(svc), {
+      filleulUserId: FILLEUL_ID,
+      filleulEmail: FILLEUL_EMAIL,
+      ip: "203.0.113.7",
+      fingerprint: null,
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("R2 : 2+ autres comptes sur la même IP → refus (3e compte = suspect)", async () => {
+    svc.queueResult("referrals", "select", { data: [], error: null }); // R4 OK
+    // R2 : DEUX autres comptes même IP → le 3e est refusé.
+    svc.queueResult("account_signals", "select", {
+      data: [{ user_id: "compte-a" }, { user_id: "compte-b" }],
       error: null,
     });
 

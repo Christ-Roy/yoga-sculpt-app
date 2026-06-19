@@ -39,8 +39,8 @@ describe("ONBOARDING_STEPS — cohérence du barème", () => {
     expect(ONBOARDING_STEPS.map((s) => s.key)).toEqual([
       "goal",
       "level",
-      "frequency",
       "availability",
+      "format",
     ]);
   });
 
