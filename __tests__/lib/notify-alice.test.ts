@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeSupabaseMock } from "../helpers/supabase-mock";
 
 /**
  * Tests de notifierAlice — notification email best-effort sur chaque événement.
@@ -8,6 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   - destinataire = ALICE_NOTIFY_EMAIL si défini, sinon fallback gdry.alice@gmail.com ;
  *   - best-effort : un échec Brevo ne throw PAS, renvoie false ;
  *   - le contenu inclut le type, le client (nom/email/tél) et le créneau.
+ *
+ * + resoudreTelClient : auth en priorité, sinon fallback profiles.phone.
  */
 
 const sendMock = vi.fn();
@@ -89,5 +92,40 @@ describe("notifierAlice", () => {
     });
     const call = sendMock.mock.calls[0][0] as { textContent: string };
     expect(call.textContent).toContain("marie@example.com");
+  });
+});
+
+describe("resoudreTelClient", () => {
+  it("renvoie le tel issu de l'auth quand il est présent (pas de lecture profil)", async () => {
+    const { resoudreTelClient } = await import("@/lib/notify-alice");
+    const mock = makeSupabaseMock();
+    const tel = await resoudreTelClient(
+      mock.client as never,
+      "user-1",
+      "+33611111111",
+    );
+    expect(tel).toBe("+33611111111");
+    // Aucune lecture profiles : l'auth a fait foi.
+    expect(mock.calls.find((c) => c.table === "profiles")).toBeUndefined();
+  });
+
+  it("retombe sur profiles.phone quand l'auth n'a pas de tel", async () => {
+    const { resoudreTelClient } = await import("@/lib/notify-alice");
+    const mock = makeSupabaseMock();
+    mock.queueResult("profiles", "select", {
+      data: { phone: "+33622222222" },
+      error: null,
+    });
+    const tel = await resoudreTelClient(mock.client as never, "user-1", null);
+    expect(tel).toBe("+33622222222");
+    expect(mock.calls.find((c) => c.table === "profiles")).toBeDefined();
+  });
+
+  it("renvoie null quand ni l'auth ni le profil n'ont de tel", async () => {
+    const { resoudreTelClient } = await import("@/lib/notify-alice");
+    const mock = makeSupabaseMock();
+    mock.queueResult("profiles", "select", { data: { phone: null }, error: null });
+    const tel = await resoudreTelClient(mock.client as never, "user-1", "  ");
+    expect(tel).toBeNull();
   });
 });

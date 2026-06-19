@@ -52,6 +52,13 @@ vi.mock("@/lib/google-calendar", () => ({
 const notifierAliceMock = vi.fn();
 vi.mock("@/lib/notify-alice", () => ({
   notifierAlice: (...args: unknown[]) => notifierAliceMock(...args),
+  // Le resolver lit profiles.phone en fallback ; en test on renvoie simplement
+  // le tel issu de l'auth (3e arg), suffisant pour le flux de réservation.
+  resoudreTelClient: (
+    _service: unknown,
+    _userId: string,
+    telAuth: string | null | undefined,
+  ) => Promise.resolve(telAuth ?? null),
 }));
 
 const USER = { id: "user-1", email: "cliente@example.com", user_metadata: {} };

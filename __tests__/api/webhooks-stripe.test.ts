@@ -327,6 +327,127 @@ describe("POST /api/webhooks/stripe", () => {
     ).toBeUndefined();
   });
 
+  it("TÉLÉPHONE : range customer_details.phone sur le profil quand il est absent", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_tel_ok",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_tel_ok",
+          client_reference_id: "user-1",
+          payment_intent: "pi_tel",
+          payment_status: "paid",
+          customer_details: { phone: "+33612345678" },
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    // Le profil n'a pas encore de tel → on rangera celui de Stripe.
+    serviceMock.queueResult("profiles", "select", {
+      data: { phone: null },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+
+    const update = serviceMock.calls.find(
+      (c) => c.table === "profiles" && c.op === "update",
+    );
+    expect(update).toBeDefined();
+    // Normalisé E.164 (ici déjà au bon format).
+    expect(update?.payload).toMatchObject({ phone: "+33612345678" });
+  });
+
+  it("TÉLÉPHONE : normalise un format FR local avant de ranger (0X… → +33…)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_tel_fr",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_tel_fr",
+          client_reference_id: "user-1",
+          payment_status: "paid",
+          customer_details: { phone: "06 12 34 56 78" },
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    serviceMock.queueResult("profiles", "select", { data: { phone: null }, error: null });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    const update = serviceMock.calls.find(
+      (c) => c.table === "profiles" && c.op === "update",
+    );
+    expect(update?.payload).toMatchObject({ phone: "+33612345678" });
+  });
+
+  it("TÉLÉPHONE : n'écrase PAS un téléphone déjà renseigné sur le profil", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_tel_keep",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_tel_keep",
+          client_reference_id: "user-1",
+          payment_status: "paid",
+          customer_details: { phone: "+33699999999" },
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+    // Le profil a DÉJÀ un tel → on ne touche à rien.
+    serviceMock.queueResult("profiles", "select", {
+      data: { phone: "+33611111111" },
+      error: null,
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    // Aucun update profiles (l'existant fait foi).
+    expect(
+      serviceMock.calls.find((c) => c.table === "profiles" && c.op === "update"),
+    ).toBeUndefined();
+  });
+
+  it("TÉLÉPHONE : ignore un numéro invalide (pas de garbage en base)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const body = JSON.stringify({
+      id: "evt_tel_bad",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_tel_bad",
+          client_reference_id: "user-1",
+          payment_status: "paid",
+          customer_details: { phone: "pas-un-numero" },
+          metadata: { user_id: "user-1", type: "collectif", quantite: "1" },
+        },
+      },
+    });
+    const sig = await signStripe(body, now);
+    serviceMock.queueResult("tickets", "upsert", { data: null, error: null });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = asMockResponse(await POST(makeReq(body, sig)));
+    expect(res.status).toBe(200);
+    // Numéro invalide → on ne lit même pas le profil et on n'écrit rien.
+    expect(serviceMock.calls.find((c) => c.table === "profiles")).toBeUndefined();
+  });
+
   it("accepte le fallback client_reference_id quand metadata.user_id est absent", async () => {
     const now = Math.floor(Date.now() / 1000);
     const body = JSON.stringify({

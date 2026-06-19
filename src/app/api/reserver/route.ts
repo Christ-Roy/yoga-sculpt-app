@@ -9,7 +9,7 @@ import {
   freeBusyQuery,
 } from "@/lib/google-calendar";
 import { logEvent } from "@/lib/events";
-import { notifierAlice } from "@/lib/notify-alice";
+import { notifierAlice, resoudreTelClient } from "@/lib/notify-alice";
 import {
   getUserGclid,
   recordAdsConversion,
@@ -283,13 +283,15 @@ export async function POST(request: Request) {
   }
 
   // ── Notif Alice (best-effort) + tracking. ───────────────────────────────────
+  // Le tel vient de l'auth si présent, sinon de profiles.phone (collecté au
+  // paiement Stripe). Indispensable pour qu'Alice puisse rappeler la cliente.
   await notifierAlice("reservation", {
     type,
     startsAt,
     endsAt,
     clientNom: labelClient(user),
     clientEmail: user.email ?? null,
-    clientTel: telClient(user),
+    clientTel: await resoudreTelClient(service, user.id, telClient(user)),
   });
 
   await logEvent(
@@ -479,13 +481,14 @@ async function reserverParticulierLibre(
   }
 
   // ── Notif Alice (best-effort) + tracking. ───────────────────────────────────
+  // Tel : auth si présent, sinon profiles.phone (collecté au paiement Stripe).
   await notifierAlice("reservation", {
     type,
     startsAt,
     endsAt,
     clientNom: clientLabel,
     clientEmail: user.email ?? null,
-    clientTel: telClient(user),
+    clientTel: await resoudreTelClient(service, user.id, telClient(user)),
   });
 
   await logEvent(
