@@ -197,7 +197,12 @@ function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
         id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: handleCredential,
-          auto_select: false,
+          // auto_select=true : zéro friction. Au clic de « Continuer en tant que
+          // <Nom> », Google connecte DIRECTEMENT le compte affiché sans rouvrir le
+          // sélecteur (et auto-connecte au chargement si 1 seul compte déjà consenti).
+          // Google impose quand même un 1er écran de consentement la 1re fois (vie
+          // privée, non bypassable) ; les fois suivantes c'est direct.
+          auto_select: true,
           cancel_on_tap_outside: true,
           context: "signin",
           itp_support: true,
