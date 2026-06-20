@@ -1,6 +1,12 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { Button } from "@/components/Button";
 import { createClient } from "@/lib/supabase/client";
 import { safeInternalRedirect } from "@/lib/auth-redirect";
@@ -93,6 +99,15 @@ const GSI_SRC = "https://accounts.google.com/gsi/client";
 interface GoogleCredentialResponse {
   credential?: string;
 }
+interface GsiButtonConfig {
+  type?: "standard" | "icon";
+  theme?: "outline" | "filled_blue" | "filled_black";
+  size?: "large" | "medium" | "small";
+  text?: "signin_with" | "signup_with" | "continue_with" | "signin";
+  shape?: "rectangular" | "pill" | "circle" | "square";
+  logo_alignment?: "left" | "center";
+  width?: number;
+}
 interface GoogleIdApi {
   initialize: (config: {
     client_id: string;
@@ -103,8 +118,11 @@ interface GoogleIdApi {
     ux_mode?: string;
     itp_support?: boolean;
     prompt_parent_id?: string;
+    use_fedcm_for_prompt?: boolean;
   }) => void;
   prompt: () => void;
+  renderButton: (parent: HTMLElement, config: GsiButtonConfig) => void;
+  cancel: () => void;
 }
 declare global {
   interface Window {
@@ -134,15 +152,20 @@ declare global {
  * Aucune erreur n'est remontée à l'UI : l'échec One Tap est TOUJOURS silencieux
  * (les autres méthodes restent dispo).
  */
-function useGoogleOneTap() {
+function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
+  // Devient true quand le bouton GSI personnalisé est réellement rendu → on peut
+  // alors masquer le bouton Google de secours (fallback OAuth classique).
+  const [gsiButtonReady, setGsiButtonReady] = useState(false);
+
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
     if (typeof window === "undefined") return;
 
-    let armed = false;
-    let scriptEl: HTMLScriptElement | null = null;
+    let cancelled = false;
+    let oneTapArmed = false;
 
-    // Callback One Tap : ouvre la session Supabase DIRECTEMENT (id_token Google).
+    // Callback partagé (bouton GSI ET One Tap) : ouvre la session Supabase
+    // DIRECTEMENT à partir de l'id_token Google (same-origin, pas de relai).
     const handleCredential = (res: GoogleCredentialResponse) => {
       if (!res?.credential) return;
       void (async () => {
@@ -152,26 +175,22 @@ function useGoogleOneTap() {
             provider: "google",
             token: res.credential as string,
           });
-          if (error) {
-            // Staging (provider non configuré) ou refus → fallback silencieux.
-            // On NE casse PAS le bouton Google classique ni le magic-link.
-            return;
-          }
-          // Succès : navigation dure pour rejouer les Server Components avec la
-          // session. redirectTo issu de l'URL, validé anti open-redirect.
+          if (error) return; // staging / refus → fallback silencieux
           const redirectTo = new URLSearchParams(window.location.search).get(
             "redirectTo",
           );
           window.location.assign(safeInternalRedirect(redirectTo, "/espace"));
         } catch {
-          // Tout échec inattendu → fallback silencieux (autres méthodes dispo).
+          // échec inattendu → fallback silencieux (autres méthodes dispo)
         }
       })();
     };
 
-    const startOneTap = () => {
-      if (armed) return;
-      armed = true;
+    // Initialise GSI + rend le BOUTON personnalisé tout de suite (immunisé au
+    // cooldown One Tap : il s'affiche TOUJOURS). Quand l'utilisateur a une session
+    // Google, Google y peint « Continuer en tant que <Nom> + photo ».
+    const init = () => {
+      if (cancelled) return;
       const id = window.google?.accounts?.id;
       if (!id) return;
       try {
@@ -182,58 +201,89 @@ function useGoogleOneTap() {
           cancel_on_tap_outside: true,
           context: "signin",
           itp_support: true,
-          prompt_parent_id: "onetap-anchor",
+          use_fedcm_for_prompt: true,
         });
-        id.prompt();
+        const parent = buttonRef.current;
+        if (parent) {
+          parent.innerHTML = "";
+          id.renderButton(parent, {
+            type: "standard",
+            theme: "filled_black", // le plus sobre vs la DA noir & or
+            size: "large",
+            text: "continue_with",
+            shape: "pill",
+            logo_alignment: "center",
+            width: parent.offsetWidth || 320,
+          });
+          if (!cancelled) setGsiButtonReady(true);
+        }
       } catch {
-        // GSI indisponible (réseau, bloqueur) → on ne propose juste pas le One Tap.
+        // GSI KO (réseau/bloqueur) → le bouton de secours OAuth reste affiché.
       }
     };
 
-    const loadGsi = () => {
-      if (window.google?.accounts?.id) {
-        startOneTap();
-        return;
+    // One Tap (bulle auto) EN PLUS — armé après 1ʳᵉ interaction (RGPD/perf).
+    const armOneTap = () => {
+      if (oneTapArmed || cancelled) return;
+      oneTapArmed = true;
+      try {
+        window.google?.accounts?.id?.prompt();
+      } catch {
+        /* la bulle ne s'affiche pas → le bouton GSI prend le relais */
       }
+    };
+
+    const loadGsi = (cb: () => void) => {
+      if (window.google?.accounts?.id) return cb();
       const existing = document.querySelector<HTMLScriptElement>(
         `script[src="${GSI_SRC}"]`,
       );
       if (existing) {
-        existing.addEventListener("load", startOneTap, { once: true });
+        existing.addEventListener("load", cb, { once: true });
         return;
       }
-      scriptEl = document.createElement("script");
-      scriptEl.src = GSI_SRC;
-      scriptEl.async = true;
-      scriptEl.defer = true;
-      scriptEl.addEventListener("load", startOneTap, { once: true });
-      document.head.appendChild(scriptEl);
+      const s = document.createElement("script");
+      s.src = GSI_SRC;
+      s.async = true;
+      s.defer = true;
+      s.addEventListener("load", cb, { once: true });
+      document.head.appendChild(s);
     };
 
-    const onFirstInteraction = () => {
-      cleanupListeners();
-      loadGsi();
-    };
+    // Le bouton se charge dès le montage (pas après interaction) : on VEUT qu'il
+    // soit visible immédiatement. Le SDK GSI est petit ; sur /login c'est l'action
+    // principale, le charger tout de suite est justifié (≠ vitrine où c'est différé).
+    loadGsi(init);
+
+    // One Tap : armé seulement après une 1ʳᵉ interaction.
     const events: (keyof DocumentEventMap)[] = [
       "scroll",
       "pointerdown",
       "keydown",
       "touchstart",
     ];
-    const cleanupListeners = () => {
-      events.forEach((e) => window.removeEventListener(e, onFirstInteraction));
+    const onFirst = () => {
+      cleanup();
+      loadGsi(armOneTap);
     };
+    const cleanup = () =>
+      events.forEach((e) => window.removeEventListener(e, onFirst));
     events.forEach((e) =>
-      window.addEventListener(e, onFirstInteraction, {
-        once: true,
-        passive: true,
-      }),
+      window.addEventListener(e, onFirst, { once: true, passive: true }),
     );
 
     return () => {
-      cleanupListeners();
+      cancelled = true;
+      cleanup();
+      try {
+        window.google?.accounts?.id?.cancel();
+      } catch {
+        /* noop */
+      }
     };
-  }, []);
+  }, [buttonRef]);
+
+  return gsiButtonReady;
 }
 
 export function AuthMethods({
@@ -252,10 +302,13 @@ export function AuthMethods({
   );
   const [isOAuthPending, startOAuth] = useTransition();
 
-  // Google One Tap (popup auto, sans clic). Coexiste avec le bouton Google
-  // classique et le magic-link. Inopérant sur staging (provider non configuré),
-  // échec silencieux.
-  useGoogleOneTap();
+  // Bouton Google Sign-In PERSONNALISÉ (GSI renderButton) : affiche « Continuer
+  // en tant que <Nom> » quand le visiteur a une session Google, sinon un bouton
+  // Google générique. Immunisé au cooldown du One Tap → toujours visible. Le One
+  // Tap (bulle) reste armé en plus. `gsiReady` = le bouton GSI est bien rendu →
+  // on masque alors le bouton OAuth de secours (sinon double bouton Google).
+  const gsiButtonRef = useRef<HTMLDivElement | null>(null);
+  const gsiReady = useGoogleSignin(gsiButtonRef);
 
   function handleOAuth(provider: "google" | "azure") {
     setOauthError(undefined);
@@ -276,18 +329,32 @@ export function AuthMethods({
 
       {/* OAuth (Google / Microsoft) — prêts, activables côté Supabase */}
       <div className="flex flex-col gap-3">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => handleOAuth("google")}
-          disabled={isOAuthPending}
-          className="w-full justify-center"
-        >
-          <span className="flex w-5 justify-center">
-            <GoogleIcon />
-          </span>
-          Continuer avec Google
-        </Button>
+        {/* Bouton Google PERSONNALISÉ (GSI) : « Continuer en tant que <Nom> » si
+            session Google. Rendu par Google dans une iframe → on lui réserve la
+            place. S'affiche toujours (pas de cooldown). */}
+        <div
+          ref={gsiButtonRef}
+          className="flex w-full justify-center [color-scheme:light]"
+          style={{ minHeight: gsiReady ? undefined : 0 }}
+          aria-label="Se connecter avec Google"
+        />
+        {/* Bouton Google de SECOURS (OAuth redirect classique) : affiché tant que
+            le bouton GSI n'est pas rendu (GSI bloqué, réseau, navigateur non
+            compatible). Évite le double bouton Google une fois le GSI prêt. */}
+        {!gsiReady && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => handleOAuth("google")}
+            disabled={isOAuthPending}
+            className="w-full justify-center"
+          >
+            <span className="flex w-5 justify-center">
+              <GoogleIcon />
+            </span>
+            Continuer avec Google
+          </Button>
+        )}
         <Button
           type="button"
           variant="secondary"
