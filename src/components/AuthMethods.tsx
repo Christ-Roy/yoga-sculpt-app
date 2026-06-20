@@ -222,12 +222,17 @@ function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
           });
           if (!cancelled) setGsiButtonReady(true);
         }
+        // ⭐ One Tap armé IMMÉDIATEMENT (pas après interaction) : sur /login c'est
+        // l'action principale, pas une intrusion. Avec auto_select=true, si le
+        // visiteur a UN seul compte Google déjà consenti, Google le connecte
+        // AUTOMATIQUEMENT sans clic (zéro friction). Sinon la bulle s'affiche et
+        // le bouton « Continuer en tant que <Nom> » reste dispo en secours.
+        armOneTap();
       } catch {
         // GSI KO (réseau/bloqueur) → le bouton de secours OAuth reste affiché.
       }
     };
 
-    // One Tap (bulle auto) EN PLUS — armé après 1ʳᵉ interaction (RGPD/perf).
     const armOneTap = () => {
       if (oneTapArmed || cancelled) return;
       oneTapArmed = true;
@@ -255,31 +260,12 @@ function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
       document.head.appendChild(s);
     };
 
-    // Le bouton se charge dès le montage (pas après interaction) : on VEUT qu'il
-    // soit visible immédiatement. Le SDK GSI est petit ; sur /login c'est l'action
-    // principale, le charger tout de suite est justifié (≠ vitrine où c'est différé).
+    // Le SDK GSI se charge dès le montage : sur /login c'est l'action principale.
+    // `init` rend le bouton ET arme le One Tap (auto-connexion) immédiatement.
     loadGsi(init);
-
-    // One Tap : armé seulement après une 1ʳᵉ interaction.
-    const events: (keyof DocumentEventMap)[] = [
-      "scroll",
-      "pointerdown",
-      "keydown",
-      "touchstart",
-    ];
-    const onFirst = () => {
-      cleanup();
-      loadGsi(armOneTap);
-    };
-    const cleanup = () =>
-      events.forEach((e) => window.removeEventListener(e, onFirst));
-    events.forEach((e) =>
-      window.addEventListener(e, onFirst, { once: true, passive: true }),
-    );
 
     return () => {
       cancelled = true;
-      cleanup();
       try {
         window.google?.accounts?.id?.cancel();
       } catch {
