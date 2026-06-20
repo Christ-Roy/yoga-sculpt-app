@@ -20,3 +20,11 @@ côté staging — ils ne le sont que sur la PROD (`esearpxflfgreejjxlfg`).
 ## Reco
 A pour débloquer le test tout de suite, B quand on veut un staging iso-prod complet.
 Pour Alice qui teste : lui envoyer un MAGIC-LINK (marche déjà) plutôt que Google.
+
+## ⚠️ Si on fait l'option B (activer Google sur staging) — NE PAS OUBLIER le nonce
+Quand on configure `external_google_*` sur Supabase staging, poser AUSSI
+**`external_google_skip_nonce_check: true`** dans le même PATCH `config/auth`. Sinon le One Tap
+(vitrine ET app `/login` `/invitation`) cassera en staging avec "Connexion Google impossible",
+exactement comme c'est arrivé en PROD le 2026-06-20 (les composants One Tap ne gèrent pas le
+nonce → Supabase rejette si le check est actif). Cf `todo/done/2026-06-20-fix-onetap-nonce-signinwithidtoken.md`.
+Penser aussi à ajouter l'origine JS staging au client OAuth GCP si on réutilise le même client_id.
