@@ -152,7 +152,13 @@ declare global {
  * Aucune erreur n'est remontée à l'UI : l'échec One Tap est TOUJOURS silencieux
  * (les autres méthodes restent dispo).
  */
-function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
+function useGoogleSignin(
+  buttonRef: React.RefObject<HTMLDivElement | null>,
+  onFallback: () => void,
+) {
+  // Garde la dernière ref du fallback sans re-déclencher l'effet GSI.
+  const fallbackRef = useRef(onFallback);
+  fallbackRef.current = onFallback;
   // Devient true quand le bouton GSI personnalisé est réellement rendu → on peut
   // alors masquer le bouton Google de secours (fallback OAuth classique).
   const [gsiButtonReady, setGsiButtonReady] = useState(false);
@@ -167,21 +173,36 @@ function useGoogleSignin(buttonRef: React.RefObject<HTMLDivElement | null>) {
     // Callback partagé (bouton GSI ET One Tap) : ouvre la session Supabase
     // DIRECTEMENT à partir de l'id_token Google (same-origin, pas de relai).
     const handleCredential = (res: GoogleCredentialResponse) => {
-      if (!res?.credential) return;
+      if (!res?.credential) {
+        console.error("[google-signin] callback sans credential", res);
+        return;
+      }
       void (async () => {
         try {
           const supabase = createClient();
-          const { error } = await supabase.auth.signInWithIdToken({
+          const { data, error } = await supabase.auth.signInWithIdToken({
             provider: "google",
             token: res.credential as string,
           });
-          if (error) return; // staging / refus → fallback silencieux
+          if (error) {
+            // ⚠️ NE PLUS avaler en silence. On logge l'erreur réelle (visible en
+            // console) ET on BASCULE sur l'OAuth redirect classique (flux robuste,
+            // sans FedCM/signInWithIdToken) → l'utilisateur EST connecté quand même.
+            console.error(
+              "[google-signin] signInWithIdToken a échoué → fallback OAuth redirect :",
+              error.message,
+              error,
+            );
+            fallbackRef.current();
+            return;
+          }
+          console.info("[google-signin] OK, session ouverte", data?.user?.email);
           const redirectTo = new URLSearchParams(window.location.search).get(
             "redirectTo",
           );
           window.location.assign(safeInternalRedirect(redirectTo, "/espace"));
-        } catch {
-          // échec inattendu → fallback silencieux (autres méthodes dispo)
+        } catch (e) {
+          console.error("[google-signin] exception inattendue :", e);
         }
       })();
     };
@@ -293,14 +314,6 @@ export function AuthMethods({
   );
   const [isOAuthPending, startOAuth] = useTransition();
 
-  // Bouton Google Sign-In PERSONNALISÉ (GSI renderButton) : affiche « Continuer
-  // en tant que <Nom> » quand le visiteur a une session Google, sinon un bouton
-  // Google générique. Immunisé au cooldown du One Tap → toujours visible. Le One
-  // Tap (bulle) reste armé en plus. `gsiReady` = le bouton GSI est bien rendu →
-  // on masque alors le bouton OAuth de secours (sinon double bouton Google).
-  const gsiButtonRef = useRef<HTMLDivElement | null>(null);
-  const gsiReady = useGoogleSignin(gsiButtonRef);
-
   function handleOAuth(provider: "google" | "azure") {
     setOauthError(undefined);
     startOAuth(async () => {
@@ -309,6 +322,16 @@ export function AuthMethods({
       if (res?.error) setOauthError(res.error);
     });
   }
+
+  // Bouton Google Sign-In PERSONNALISÉ (GSI renderButton) : affiche « Continuer
+  // en tant que <Nom> » quand le visiteur a une session Google, sinon un bouton
+  // Google générique. Immunisé au cooldown du One Tap → toujours visible. Le One
+  // Tap (bulle) reste armé en plus. `gsiReady` = le bouton GSI est bien rendu →
+  // on masque alors le bouton OAuth de secours (sinon double bouton Google).
+  // onFallback : si signInWithIdToken échoue (FedCM/token), on bascule sur l'OAuth
+  // redirect classique (robuste) → l'utilisateur EST connecté quand même.
+  const gsiButtonRef = useRef<HTMLDivElement | null>(null);
+  const gsiReady = useGoogleSignin(gsiButtonRef, () => handleOAuth("google"));
 
   const displayError = state.error ?? oauthError;
 
