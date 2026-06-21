@@ -152,16 +152,18 @@ declare global {
  * Aucune erreur n'est remontée à l'UI : l'échec One Tap est TOUJOURS silencieux
  * (les autres méthodes restent dispo).
  */
-function useGoogleSignin(
-  buttonRef: React.RefObject<HTMLDivElement | null>,
-  onFallback: () => void,
-) {
+/**
+ * Arme le Google One Tap (bulle de connexion rapide) en BONUS. Le bouton de
+ * connexion principal, lui, est l'OAuth redirect classique (signInWithOAuth) qui
+ * revient bien sur l'app. Ici on ne rend AUCUN bouton — juste le One Tap. Si son
+ * `signInWithIdToken` échoue (FedCM/token), on bascule sur `onFallback` (OAuth).
+ */
+function useGoogleSignin(onFallback: () => void) {
   // Garde la dernière ref du fallback sans re-déclencher l'effet GSI.
   const fallbackRef = useRef(onFallback);
-  fallbackRef.current = onFallback;
-  // Devient true quand le bouton GSI personnalisé est réellement rendu → on peut
-  // alors masquer le bouton Google de secours (fallback OAuth classique).
-  const [gsiButtonReady, setGsiButtonReady] = useState(false);
+  useEffect(() => {
+    fallbackRef.current = onFallback;
+  }, [onFallback]);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
@@ -229,20 +231,6 @@ function useGoogleSignin(
           itp_support: true,
           use_fedcm_for_prompt: true,
         });
-        const parent = buttonRef.current;
-        if (parent) {
-          parent.innerHTML = "";
-          id.renderButton(parent, {
-            type: "standard",
-            theme: "filled_black", // le plus sobre vs la DA noir & or
-            size: "large",
-            text: "continue_with",
-            shape: "pill",
-            logo_alignment: "center",
-            width: parent.offsetWidth || 320,
-          });
-          if (!cancelled) setGsiButtonReady(true);
-        }
         // ⭐ One Tap armé IMMÉDIATEMENT (pas après interaction) : sur /login c'est
         // l'action principale, pas une intrusion. Avec auto_select=true, si le
         // visiteur a UN seul compte Google déjà consenti, Google le connecte
@@ -293,9 +281,7 @@ function useGoogleSignin(
         /* noop */
       }
     };
-  }, [buttonRef]);
-
-  return gsiButtonReady;
+  }, []);
 }
 
 export function AuthMethods({
@@ -323,15 +309,10 @@ export function AuthMethods({
     });
   }
 
-  // Bouton Google Sign-In PERSONNALISÉ (GSI renderButton) : affiche « Continuer
-  // en tant que <Nom> » quand le visiteur a une session Google, sinon un bouton
-  // Google générique. Immunisé au cooldown du One Tap → toujours visible. Le One
-  // Tap (bulle) reste armé en plus. `gsiReady` = le bouton GSI est bien rendu →
-  // on masque alors le bouton OAuth de secours (sinon double bouton Google).
-  // onFallback : si signInWithIdToken échoue (FedCM/token), on bascule sur l'OAuth
-  // redirect classique (robuste) → l'utilisateur EST connecté quand même.
-  const gsiButtonRef = useRef<HTMLDivElement | null>(null);
-  const gsiReady = useGoogleSignin(gsiButtonRef, () => handleOAuth("google"));
+  // Google One Tap (bulle de connexion rapide) en bonus. Le bouton Google visible
+  // est l'OAuth redirect classique (ci-dessous). Si le One Tap échoue → fallback
+  // sur ce même OAuth redirect.
+  useGoogleSignin(() => handleOAuth("google"));
 
   const displayError = state.error ?? oauthError;
 
@@ -343,32 +324,23 @@ export function AuthMethods({
 
       {/* OAuth (Google / Microsoft) — prêts, activables côté Supabase */}
       <div className="flex flex-col gap-3">
-        {/* Bouton Google PERSONNALISÉ (GSI) : « Continuer en tant que <Nom> » si
-            session Google. Rendu par Google dans une iframe → on lui réserve la
-            place. S'affiche toujours (pas de cooldown). */}
-        <div
-          ref={gsiButtonRef}
-          className="flex w-full justify-center [color-scheme:light]"
-          style={{ minHeight: gsiReady ? undefined : 0 }}
-          aria-label="Se connecter avec Google"
-        />
-        {/* Bouton Google de SECOURS (OAuth redirect classique) : affiché tant que
-            le bouton GSI n'est pas rendu (GSI bloqué, réseau, navigateur non
-            compatible). Évite le double bouton Google une fois le GSI prêt. */}
-        {!gsiReady && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => handleOAuth("google")}
-            disabled={isOAuthPending}
-            className="w-full justify-center"
-          >
-            <span className="flex w-5 justify-center">
-              <GoogleIcon />
-            </span>
-            Continuer avec Google
-          </Button>
-        )}
+        {/* Bouton Google = OAuth REDIRECT classique (signInWithOAuth → Google →
+            /auth/callback). C'est le flux ROBUSTE qui REVIENT bien sur l'app.
+            ⚠️ Le bouton GSI renderButton (signInWithIdToken / FedCM) restait coincé
+            sur la page Google sans revenir — retiré. Le One Tap (bulle) reste armé
+            en bonus pour la connexion rapide quand Google le permet. */}
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => handleOAuth("google")}
+          disabled={isOAuthPending}
+          className="w-full justify-center"
+        >
+          <span className="flex w-5 justify-center">
+            <GoogleIcon />
+          </span>
+          Continuer avec Google
+        </Button>
         <Button
           type="button"
           variant="secondary"
