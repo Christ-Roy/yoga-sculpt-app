@@ -8,8 +8,6 @@ import {
   useTransition,
 } from "react";
 import { Button } from "@/components/Button";
-import { createClient } from "@/lib/supabase/client";
-import { safeInternalRedirect } from "@/lib/auth-redirect";
 import {
   signInWithMagicLink,
   signInWithOAuth,
@@ -133,30 +131,43 @@ declare global {
 /**
  * Google One Tap pour l'espace client (auth LOCALE, cookies app).
  *
- * Contrairement au vitrine (cross-domain → relai `/auth/onetap`), ici la session
- * Supabase vit sur le MÊME domaine que cette page : on ouvre donc la session
- * DIRECTEMENT dans le callback via `signInWithIdToken({ provider:"google" })`,
- * sans relai. Au succès → navigation dure vers `safeInternalRedirect(?redirectTo,
- * "/espace")` : les Server Components re-tournent avec le cookie de session
- * fraîchement posé (et routent vers /onboarding si besoin). Le cookie `ys_ref`
- * (parrainage) est SAME-ORIGIN → il survit à la navigation sans qu'on y touche.
+ * ⚠️ POURQUOI on NE fait PLUS `signInWithIdToken` côté CLIENT ici (fix 2026-06-22)
+ * ──────────────────────────────────────────────────────────────────────────────
+ * Symptôme : sur iPhone, la bulle One Tap s'affichait sur `/login` MAIS au clic
+ * l'utilisateur n'était PAS connecté (restait dehors / re-bounce vers /login),
+ * ALORS QUE le One Tap du VITRINE marchait sur le même iPhone.
+ *
+ * Cause : Safari/Chrome iOS appliquent l'Intelligent Tracking Prevention (ITP).
+ * Sous ITP, `supabase.auth.signInWithIdToken(...)` exécuté DANS LE NAVIGATEUR
+ * (createClient browser) n'arrive pas à persister fiablement les cookies de
+ * session → l'appel paraît OK mais la navigation suivante n'a pas de session.
+ * Le VITRINE, lui, ne fait jamais ça : il RELAIE le credential vers la route
+ * SERVEUR `/auth/onetap`, qui pose les cookies via une réponse HTTP serveur
+ * (fiable sous ITP). D'où : ça marche depuis le vitrine, pas depuis /login.
+ *
+ * Fix : on aligne `/login` sur le vitrine. Le callback One Tap NE fait plus de
+ * session côté client — il fait une REDIRECTION PLEINE PAGE vers la même route
+ * serveur `/auth/onetap?credential=<JWT>` (same-origin ici, donc encore plus
+ * simple). Cette route (déjà testée, déjà en prod) fait `signInWithIdToken` côté
+ * serveur, pose les cookies, gère parrainage + gclid + onboarding, puis redirige
+ * vers /espace (ou /onboarding). Plus AUCUN `signInWithIdToken` client dans l'app.
+ *
+ * Le bouton « Continuer avec Google » visible reste l'OAuth redirect classique
+ * (signInWithOAuth) — robuste lui aussi. Le One Tap est un BONUS rapide.
  *
  * RGPD/perf : le SDK GSI n'est chargé et le prompt armé qu'APRÈS une 1ʳᵉ
  * interaction (scroll/clic/touch) — pas d'invite intrusive au 1er paint.
  *
- * STAGING : Google OAuth n'est PAS configuré sur le Supabase staging →
- * `signInWithIdToken` renvoie une erreur (provider non supporté). On l'avale
- * SILENCIEUSEMENT (fallback : le bouton Google classique / le magic-link). Le One
- * Tap n'est donc réellement fonctionnel qu'en PROD.
- *
- * Aucune erreur n'est remontée à l'UI : l'échec One Tap est TOUJOURS silencieux
- * (les autres méthodes restent dispo).
+ * STAGING : Google OAuth n'est PAS configuré sur le Supabase staging → la route
+ * `/auth/onetap` renvoie un fallback `/login?error=...` (provider non supporté).
+ * Le One Tap n'est donc réellement fonctionnel qu'en PROD ; les autres méthodes
+ * (Microsoft, magic-link) restent dispo partout.
  */
 /**
- * Arme le Google One Tap (bulle de connexion rapide) en BONUS. Le bouton de
- * connexion principal, lui, est l'OAuth redirect classique (signInWithOAuth) qui
- * revient bien sur l'app. Ici on ne rend AUCUN bouton — juste le One Tap. Si son
- * `signInWithIdToken` échoue (FedCM/token), on bascule sur `onFallback` (OAuth).
+ * Arme le Google One Tap (bulle de connexion rapide) en BONUS. Au clic, on relaie
+ * le credential vers la route SERVEUR `/auth/onetap` (flux qui marche sous ITP/iOS),
+ * jamais un signInWithIdToken côté client. `onFallback` (OAuth redirect) reste le
+ * filet si le SDK GSI lui-même ne se charge pas (réseau/bloqueur).
  */
 function useGoogleSignin(onFallback: () => void) {
   // Garde la dernière ref du fallback sans re-déclencher l'effet GSI.
@@ -172,41 +183,25 @@ function useGoogleSignin(onFallback: () => void) {
     let cancelled = false;
     let oneTapArmed = false;
 
-    // Callback partagé (bouton GSI ET One Tap) : ouvre la session Supabase
-    // DIRECTEMENT à partir de l'id_token Google (same-origin, pas de relai).
+    // Callback One Tap : on NE pose PAS la session côté client (KO sous ITP iOS).
+    // On RELAIE le credential vers la route SERVEUR `/auth/onetap` par une
+    // redirection pleine page — elle ouvre la session côté serveur (cookies
+    // fiables) et redirige vers /espace ou /onboarding. C'est exactement le flux
+    // du vitrine, qui marche sur iPhone.
     const handleCredential = (res: GoogleCredentialResponse) => {
       if (!res?.credential) {
         console.error("[google-signin] callback sans credential", res);
         return;
       }
-      void (async () => {
-        try {
-          const supabase = createClient();
-          const { data, error } = await supabase.auth.signInWithIdToken({
-            provider: "google",
-            token: res.credential as string,
-          });
-          if (error) {
-            // ⚠️ NE PLUS avaler en silence. On logge l'erreur réelle (visible en
-            // console) ET on BASCULE sur l'OAuth redirect classique (flux robuste,
-            // sans FedCM/signInWithIdToken) → l'utilisateur EST connecté quand même.
-            console.error(
-              "[google-signin] signInWithIdToken a échoué → fallback OAuth redirect :",
-              error.message,
-              error,
-            );
-            fallbackRef.current();
-            return;
-          }
-          console.info("[google-signin] OK, session ouverte", data?.user?.email);
-          const redirectTo = new URLSearchParams(window.location.search).get(
-            "redirectTo",
-          );
-          window.location.assign(safeInternalRedirect(redirectTo, "/espace"));
-        } catch (e) {
-          console.error("[google-signin] exception inattendue :", e);
-        }
-      })();
+      // Préserve un éventuel ?redirectTo (la route serveur le re-valide en
+      // liste blanche anti open-redirect).
+      const redirectTo = new URLSearchParams(window.location.search).get(
+        "redirectTo",
+      );
+      const relay = new URL("/auth/onetap", window.location.origin);
+      relay.searchParams.set("credential", res.credential as string);
+      if (redirectTo) relay.searchParams.set("redirectTo", redirectTo);
+      window.location.assign(relay.toString());
     };
 
     // Initialise GSI + rend le BOUTON personnalisé tout de suite (immunisé au
