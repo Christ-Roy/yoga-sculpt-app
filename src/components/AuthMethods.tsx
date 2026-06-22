@@ -8,11 +8,8 @@ import {
   useTransition,
 } from "react";
 import { Button } from "@/components/Button";
-import {
-  signInWithMagicLink,
-  signInWithOAuth,
-  type AuthState,
-} from "@/app/login/actions";
+import { createClient } from "@/lib/supabase/client";
+import { signInWithMagicLink, type AuthState } from "@/app/login/actions";
 
 /**
  * Bloc d'authentification PARTAGÉ — Google + Microsoft (OAuth) + magic-link
@@ -298,9 +295,40 @@ export function AuthMethods({
   function handleOAuth(provider: "google" | "azure") {
     setOauthError(undefined);
     startOAuth(async () => {
-      const res = await signInWithOAuth(provider);
-      // On success the action redirects; we only get here on error.
-      if (res?.error) setOauthError(res.error);
+      // ⚠️ OAuth déclenché CÔTÉ CLIENT (browser client), PAS via une server action.
+      // ──────────────────────────────────────────────────────────────────────────
+      // Bug réglé 2026-06-22 : la server action `signInWithOAuth` + `redirect()`
+      // PERDAIT le cookie PKCE `code_verifier` sur Cloudflare Workers (le
+      // redirect() jette NEXT_REDIRECT avant que le Set-Cookie soit committé →
+      // cf supabase/ssr#55). Sans code_verifier, Supabase retombait en flux
+      // IMPLICIT et renvoyait les tokens dans le FRAGMENT (#access_token) sur le
+      // Site URL (/login), au lieu de `?code=` sur /auth/callback. Le callback
+      // serveur ne voit jamais le fragment `#` → "Lien invalide ou expiré" →
+      // login Google CASSÉ pour tout le monde (les users se rabattaient sur le
+      // magic-link). Le browser client, lui, pose le cookie code_verifier de
+      // façon FIABLE avant de rediriger vers Google → PKCE complet → `?code=`.
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          ...(provider === "google"
+            ? {
+                scopes: "openid email profile",
+                queryParams: { access_type: "offline", prompt: "consent" },
+              }
+            : { scopes: "openid email profile" }),
+        },
+      });
+      if (error) {
+        setOauthError(
+          "Connexion impossible pour le moment. Réessayez ou utilisez l'e-mail.",
+        );
+        return;
+      }
+      // Le browser client ne redirige pas tout seul quand on déstructure data :
+      // on navigue explicitement vers l'URL d'autorisation Google retournée.
+      if (data?.url) window.location.assign(data.url);
     });
   }
 

@@ -61,9 +61,16 @@ export async function signInWithMagicLink(
 }
 
 /**
- * OAuth sign-in (Google / Microsoft-azure). Returns a redirect to the
- * provider's consent screen. Requires the provider to be configured in the
- * Supabase dashboard (see SETUP.md) — until then it returns a friendly error.
+ * @deprecated NE PLUS UTILISER pour déclencher l'OAuth. Conservée pour référence.
+ *
+ * ⚠️ Cette server action + `redirect(data.url)` PERD le cookie PKCE `code_verifier`
+ * sur Cloudflare Workers : `redirect()` jette NEXT_REDIRECT avant que le Set-Cookie
+ * soit committé (cf supabase/ssr#55). Résultat : Supabase retombe en flux IMPLICIT,
+ * renvoie les tokens dans le fragment `#access_token` sur le Site URL (/login), et
+ * `/auth/callback` (qui attend `?code=`) échoue → login Google CASSÉ. Bug réglé le
+ * 2026-06-22 en déclenchant l'OAuth CÔTÉ CLIENT (browser client) dans
+ * `AuthMethods.tsx#handleOAuth` — le navigateur pose le cookie code_verifier de
+ * façon fiable. Voir le skill `oauth`.
  */
 export async function signInWithOAuth(
   provider: "google" | "azure",
