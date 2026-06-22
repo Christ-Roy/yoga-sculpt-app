@@ -4,7 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enregistrerSignaux, completerReferral } from "@/lib/referral";
 import { getClientIp } from "@/lib/anti-abuse";
-import { captureGclidOnProfile, parseGclidCookie } from "@/lib/ads-attribution";
+import {
+  captureGclidOnProfile,
+  parseGclidCookie,
+  parseGclidFromParams,
+} from "@/lib/ads-attribution";
 import { logEvent } from "@/lib/events";
 import { safeInternalRedirect } from "@/lib/auth-redirect";
 import { createLogger, serializeError } from "@/lib/log";
@@ -99,14 +103,20 @@ export async function GET(request: Request) {
 
         const cookieStore = await cookies();
 
-        // ── ATTRIBUTION ADS — capter le gclid first-touch (cookie ys_gclid posé
-        //    par la vitrine, scope Domain=.yoga-sculpt.fr). Best-effort, n'écrase
-        //    pas une attribution déjà posée. Sert à attribuer paiements + valeur
-        //    parrainage à ce clic Ads côté serveur (cf lib/ads-attribution).
+        // ── ATTRIBUTION ADS — capter le gclid first-touch. Deux sources, dans
+        //    l'ordre de fiabilité :
+        //    1. cookie `ys_gclid` (posé par la vitrine, scope .yoga-sculpt.fr) —
+        //       présent quand l'auth se fait sur le MÊME navigateur que le clic
+        //       d'annonce (Google OAuth / One Tap / magic-link même device).
+        //    2. FALLBACK query `?gclid=` — propagé DANS le lien magic-link par
+        //       signInWithMagicLink, pour survivre à un magic-link ouvert sur un
+        //       AUTRE device/navigateur (cas cross-device). Cf todo trou-attribution.
+        //    Best-effort, n'écrase pas une attribution déjà posée (first-touch).
         await captureGclidOnProfile(
           service,
           user.id,
-          parseGclidCookie(cookieStore.get("ys_gclid")?.value),
+          parseGclidCookie(cookieStore.get("ys_gclid")?.value) ??
+            parseGclidFromParams(searchParams),
         );
 
         const refCode = cookieStore.get("ys_ref")?.value;

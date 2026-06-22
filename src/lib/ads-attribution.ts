@@ -47,6 +47,35 @@ export function parseGclidCookie(raw: string | undefined | null): GclidPayload |
 }
 
 /**
+ * Sérialise un GclidPayload en query string pour le PROPAGER dans un lien
+ * magic-link (cross-device). On ne met que les identifiants de clic + la date —
+ * pas la landing (inutile au fallback, garde l'URL courte). Renvoie "" si rien à
+ * propager. Le préfixe (`?`/`&`) est géré par l'appelant.
+ */
+export function gclidToQuery(payload: GclidPayload | null): string {
+  if (!payload) return "";
+  const p = new URLSearchParams();
+  if (payload.gclid) p.set("gclid", payload.gclid);
+  if (payload.gbraid) p.set("gbraid", payload.gbraid);
+  if (payload.wbraid) p.set("wbraid", payload.wbraid);
+  if (payload.ts) p.set("ad_ts", payload.ts);
+  return p.toString();
+}
+
+/**
+ * Reconstruit un GclidPayload depuis les query params d'une URL (fallback
+ * magic-link cross-device : le cookie ys_gclid n'est pas sur le device qui ouvre
+ * le mail, mais le gclid voyage dans le lien). null si aucun identifiant de clic.
+ */
+export function parseGclidFromParams(params: URLSearchParams): GclidPayload | null {
+  const gclid = params.get("gclid") ?? undefined;
+  const gbraid = params.get("gbraid") ?? undefined;
+  const wbraid = params.get("wbraid") ?? undefined;
+  if (!gclid && !gbraid && !wbraid) return null;
+  return { gclid, gbraid, wbraid, ts: params.get("ad_ts") ?? undefined };
+}
+
+/**
  * Range le gclid sur le profil en FIRST-TOUCH : n'écrit QUE si aucun gclid n'est
  * encore présent (on ne réattribue pas un user déjà acquis à un clic plus récent).
  * Best-effort : avale toute erreur. service_role attendu.

@@ -1,9 +1,10 @@
 "use server";
 
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { parseGclidCookie, gclidToQuery } from "@/lib/ads-attribution";
 
 export type AuthState = {
   ok?: boolean;
@@ -41,10 +42,27 @@ export async function signInWithMagicLink(
   const origin = await getOrigin();
   const supabase = await createClient();
 
+  // ── ATTRIBUTION ADS CROSS-DEVICE ────────────────────────────────────────────
+  // Le gclid n'arrive QUE sur le navigateur qui a cliqué l'annonce (cookie
+  // ys_gclid posé par la vitrine, scope .yoga-sculpt.fr). Or le magic-link est
+  // souvent ouvert sur un AUTRE device/navigateur (mail relevé sur mobile) qui
+  // n'a PAS ce cookie → gclid perdu au callback. Fix : on lit le cookie ICI (au
+  // moment de la demande, sur le bon navigateur) et on PROPAGE le gclid DANS le
+  // lien (`emailRedirectTo`), pour qu'il survive au changement de device. Le
+  // callback le relira en fallback (cf parseGclidFromParams). Best-effort : si
+  // pas de cookie, l'URL reste `/auth/callback` nu.
+  const cookieStore = await cookies();
+  const gclidQuery = gclidToQuery(
+    parseGclidCookie(cookieStore.get("ys_gclid")?.value),
+  );
+  const emailRedirectTo = gclidQuery
+    ? `${origin}/auth/callback?${gclidQuery}`
+    : `${origin}/auth/callback`;
+
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo,
       shouldCreateUser: true,
     },
   });
