@@ -80,9 +80,15 @@ export async function GET(request: Request) {
     });
 
     if (signInError) {
-      // Staging (provider Google non configuré sur Supabase) ou refus / token
-      // expiré → fallback propre. Le vitrine retombera sur le login Google
-      // classique de l'app.
+      // ⚠️ NE PLUS avaler l'erreur en silence (piège skill `oauth`) : on logge la
+      // cause RÉELLE du rejet Supabase pour pouvoir diagnostiquer "Connexion Google
+      // impossible" via `wrangler tail`. Causes typiques : provider non configuré
+      // (staging), nonce, audience du token, token expiré.
+      log.error("signInWithIdToken (one tap) a échoué", {
+        message: signInError.message,
+        status: (signInError as { status?: number }).status ?? null,
+        code: (signInError as { code?: string }).code ?? null,
+      });
       const url = new URL("/login", origin);
       url.searchParams.set("error", "Connexion Google impossible. Réessayez.");
       return NextResponse.redirect(url);
