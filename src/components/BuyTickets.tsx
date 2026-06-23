@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import type { TicketType } from "@/lib/db-types";
 import { Spinner } from "@/components/ui/spinner";
+import { trackFunnel, FUNNEL } from "@/lib/veridian-analytics";
 
 /**
  * Achat de tickets — 3 formules (remplace/complète `BuyTicketButton.tsx`).
@@ -77,6 +78,10 @@ export function BuyTickets({
         const data = (await res.json()) as { ready?: boolean; url?: string };
 
         if (data.url) {
+          // Tunnel : départ vers Stripe (checkout lancé), avec la formule choisie.
+          void trackFunnel(FUNNEL.CHECKOUT_START, {
+            properties: { formule },
+          });
           window.location.href = data.url;
           return; // redirection en cours
         }

@@ -29,6 +29,7 @@ import { Button } from "@/components/Button";
 import { ShareInvitation } from "@/components/ShareInvitation";
 import { TicketIcon } from "@/components/TicketIcon";
 import { ONBOARDING_STEPS, type OnboardingDraft } from "@/lib/onboarding";
+import { trackFunnel, FUNNEL } from "@/lib/veridian-analytics";
 import { saveOnboarding, saveOnboardingProgress } from "./actions";
 
 /** Mapping nom d'icône (lib/onboarding) → composant lucide. */
@@ -179,6 +180,7 @@ export function OnboardingFlow({
       if (res.ok) {
         // saveOnboarding a nettoyé le brouillon (onboarding_completed=true) :
         // on ne re-persiste PAS de draft ici, on avance juste l'écran.
+        void trackFunnel(FUNNEL.ONBOARDING_COMPLETE); // tunnel
         setPhase("invite"); // → étape 5 : inviter un ami
       } else {
         setError(res.error ?? "Une erreur est survenue.");

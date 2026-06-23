@@ -18,6 +18,7 @@ import { LieuMaps } from "@/components/LieuMaps";
 import { ReserverParticulierLibre } from "@/components/ReserverParticulierLibre";
 import { useToast } from "@/components/ui/toast";
 import { Spinner } from "@/components/ui/spinner";
+import { trackFunnel, FUNNEL } from "@/lib/veridian-analytics";
 
 /**
  * Calendrier de réservation MAISON (remplace l'embed Cal.com).
@@ -136,6 +137,9 @@ export function ReserverClient({
         "Paiement reçu, merci ! Vos tickets sont crédités sous quelques secondes.",
         "success",
       );
+      // Tunnel : achat confirmé (retour Stripe). La valeur € fiable est calculée
+      // côté serveur (webhook Stripe) ; ici on marque la conversion côté visiteur.
+      void trackFunnel(FUNNEL.PURCHASE);
     } else if (statusParam === "cancel") {
       toast("Paiement annulé.", "error");
     }
@@ -210,6 +214,9 @@ export function ReserverClient({
           [c.type]: Math.max(0, s[c.type] - 1),
         }));
         toast("Séance réservée !", "success");
+        void trackFunnel(FUNNEL.RESERVATION_CONFIRMED, {
+          properties: { type: c.type },
+        });
         return;
       }
 
@@ -275,6 +282,9 @@ export function ReserverClient({
             }));
             setReserves((r) => ({ ...r, [booking.google_event_id]: booking.id }));
             toast("Séance réservée !", "success");
+            void trackFunnel(FUNNEL.RESERVATION_CONFIRMED, {
+              properties: { type: "particulier" },
+            });
           }}
           onNeedsPurchase={(type) => {
             setAchatType(type);

@@ -45,7 +45,12 @@ const CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
   // 'unsafe-inline' nécessaire tant que Next injecte des scripts d'hydratation
   // sans nonce. 'unsafe-eval' VOLONTAIREMENT absent (non requis en prod).
-  "script-src": ["'self'", "'unsafe-inline'"],
+  // analytics-engine = tracker Veridian (chargement du bundle /sdk/v1/tracker.js).
+  "script-src": [
+    "'self'",
+    "'unsafe-inline'",
+    "https://analytics-engine.app.veridian.site",
+  ],
   // Tailwind + styles inline de composants.
   "style-src": ["'self'", "'unsafe-inline'"],
   // Avatars OAuth (Google/Microsoft) + data: (favicons/SVG inline éventuels).
@@ -65,6 +70,8 @@ const CSP_DIRECTIVES: Record<string, string[]> = {
     "https://*.supabase.co",
     "wss://*.supabase.co",
     "https://api.stripe.com",
+    // Events du tracker Veridian (POST /api/track).
+    "https://analytics-engine.app.veridian.site",
   ],
   // Redirection / POST vers Stripe Checkout.
   "form-action": ["'self'", "https://checkout.stripe.com", "https://*.stripe.com"],

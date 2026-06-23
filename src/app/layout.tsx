@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Anton, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
+import VeridianAnalytics from "@/components/VeridianAnalytics";
 
 const anton = Anton({
   variable: "--font-anton",
@@ -47,6 +48,10 @@ export default function RootLayout({
   return (
     <html lang="fr" className={`${anton.variable} ${inter.variable} h-full`}>
       <body className="min-h-full bg-bg text-text antialiased">
+        {/* Tracker Veridian Analytics (mesure first-party du tunnel, cross-domain
+            avec le vitrine). Sans userId ici → couvre login/onboarding/checkout.
+            L'identification au user Supabase se fait dans espace/layout. */}
+        <VeridianAnalytics />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

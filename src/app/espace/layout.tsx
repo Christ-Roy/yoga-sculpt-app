@@ -7,6 +7,7 @@ import { estAdmin } from "@/lib/admin";
 import { AppSidebar } from "@/components/AppSidebar";
 import { SidebarTopbar } from "@/components/SidebarTopbar";
 import { FingerprintCollector } from "@/components/FingerprintCollector";
+import VeridianAnalytics from "@/components/VeridianAnalytics";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 /**
@@ -59,6 +60,9 @@ export default async function EspaceLayout({
       </SidebarInset>
       {/* Collecte anti-abus du parrainage (silencieuse, best-effort, 1×/session). */}
       <FingerprintCollector />
+      {/* Identifie le visiteur (jointure session anonyme → user Supabase) pour
+          recoller tout le tunnel cross-domain au bon client. */}
+      <VeridianAnalytics userId={user.id} />
     </SidebarProvider>
   );
 }
