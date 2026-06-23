@@ -60,9 +60,11 @@ export default async function EspaceLayout({
       </SidebarInset>
       {/* Collecte anti-abus du parrainage (silencieuse, best-effort, 1×/session). */}
       <FingerprintCollector />
-      {/* Identifie le visiteur (jointure session anonyme → user Supabase) pour
-          recoller tout le tunnel cross-domain au bon client. */}
-      <VeridianAnalytics userId={user.id} />
+      {/* Identifie le visiteur (jointure session anonyme → user) pour recoller le
+          tunnel cross-domain au bon client. On envoie l'EMAIL (pas l'UUID Supabase) :
+          c'est l'identité stable qui permet à l'engine de résoudre la Person dans le
+          CRM (crm_mapping identity_resolver=email). Fallback UUID si pas d'email. */}
+      <VeridianAnalytics userId={user.email || user.id} />
     </SidebarProvider>
   );
 }
