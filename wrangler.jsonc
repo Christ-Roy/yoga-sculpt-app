@@ -10,6 +10,15 @@
   //   push sur `staging` → CI auto-deploy en staging  (--env staging)
   //   merge dans `main`  → deploy prod MANUEL          (--env production, workflow_dispatch)
   //
+  // 🔴🔴 NE JAMAIS LANCER `wrangler deploy --env production` DEPUIS UNE MACHINE LOCALE.
+  //   Les clés Supabase sont des NEXT_PUBLIC_* → INLINÉES dans le bundle au `next build`.
+  //   Un build local lit `.env.local` (= STAGING) → le bundle prod tape le Supabase
+  //   STAGING (Google OAuth désactivé) → LOGIN GOOGLE CASSÉ EN PROD. Vécu 2026-06-23
+  //   (3 sessions perdues). Le SEUL canal prod = `gh workflow run deploy-production.yml`.
+  //   Gardes : `npm run deploy:prod` est bloqué hors CI (guard-prod-deploy-ci-only.sh)
+  //   et le bundle est vérifié avant push (check-prod-bundle-supabase.sh). Le `wrangler
+  //   deploy` brut tapé à la main CONTOURNE ces gardes — d'où cet avertissement.
+  //
   // ⚠️ La config RACINE (top-level) ci-dessous = celle de PRODUCTION par défaut.
   //    En wrangler, dès qu'on utilise `env.*`, on cible un env nommé avec
   //    `--env <nom>`. On a donc :

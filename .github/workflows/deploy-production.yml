@@ -83,9 +83,24 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.PROD_NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
+      # 🔴 Filet anti "login Google KO" : refuse de déployer si le bundle pointe
+      # vers le Supabase STAGING (ou n'a pas la ref PROD). Protège même la CI
+      # contre un secret PROD_NEXT_PUBLIC_SUPABASE_URL mal configuré. Cf incident
+      # 2026-06-23 (3 sessions perdues) + scripts/ci/check-prod-bundle-supabase.sh.
+      - name: Vérifier le bundle (Supabase PROD, pas staging)
+        run: bash scripts/ci/check-prod-bundle-supabase.sh
+
       - name: Deploy to Cloudflare (production)
         run: npx wrangler deploy --env production
         env:
           CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # 🟢 Smoke test post-deploy : vérifie EN PROD RÉELLE que /login répond et que
+      # le bundle servi pointe Supabase PROD (pas staging) → login Google sain.
+      # Laisse le CDN propager quelques secondes avant de tester.
+      - name: Smoke test login prod
+        run: |
+          sleep 20
+          bash scripts/ci/smoke-prod-login.sh

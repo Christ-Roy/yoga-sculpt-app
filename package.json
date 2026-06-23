@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "ci:checks": "scripts/ci/check-test-mapping.sh && scripts/ci/check-no-stripe-live-key.sh && scripts/ci/check-no-dev-auth-bypass.sh && scripts/ci/check-migration-safety.sh && scripts/ci/check-env-sync.sh",
     "deploy:staging": "opennextjs-cloudflare build && wrangler deploy --env staging",
-    "deploy:prod": "opennextjs-cloudflare build && wrangler deploy --env production",
+    "deploy:prod": "bash scripts/ci/guard-prod-deploy-ci-only.sh && opennextjs-cloudflare build && bash scripts/ci/check-prod-bundle-supabase.sh && wrangler deploy --env production",
     "prepare": "husky"
   },
   "lint-staged": {
