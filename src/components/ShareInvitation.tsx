@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { Share2, Check, Copy } from "lucide-react";
 import { InviteAmiForm } from "@/components/InviteAmiForm";
+import { trackFunnel } from "@/lib/veridian-analytics";
 
 /**
  * ShareInvitation — bloc de partage d'une invitation de parrainage, adaptatif au
@@ -127,6 +128,8 @@ export function ShareInvitation({
     void fetch("/api/parrainage/partage", { method: "POST" }).catch(() => {
       /* best-effort : un échec de tracking ne doit rien casser */
     });
+    // Branche PARRAINAGE du tunnel analytics : le parrain a partagé son lien.
+    void trackFunnel("referral_shared");
   }
 
   async function partager() {

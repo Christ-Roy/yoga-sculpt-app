@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Spinner } from "@/components/ui/spinner";
+import { trackFunnel } from "@/lib/veridian-analytics";
 
 /**
  * Formulaire d'invitation d'un ami au parrainage.
@@ -56,6 +57,8 @@ export function InviteAmiForm({
           setSucces(`Invitation envoyée à ${valeur}.`);
           setEmail("");
           onInvite?.(valeur);
+          // Branche PARRAINAGE du tunnel : invitation e-mail envoyée par le parrain.
+          void trackFunnel("referral_invited");
           return;
         }
 

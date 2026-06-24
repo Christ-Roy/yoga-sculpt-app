@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { trackFunnel } from "@/lib/veridian-analytics";
 
 /**
  * Collecteur de fingerprint device + complétion du parrainage (silencieux).
@@ -308,7 +309,13 @@ export function FingerprintCollector() {
           // Complétion tentée une fois : on retire le cookie de parrainage pour
           // ne pas le rejouer à chaque session (le crédit est idempotent côté
           // serveur, mais on évite des POST inutiles). Best-effort.
-          if (code) effacerCookieRef();
+          if (code) {
+            // Branche PARRAINAGE du tunnel analytics : un filleul (venu d'un lien
+            // de parrainage, code présent) complète son entrée. 1×/filleul (le
+            // cookie est effacé juste après). Bout de la branche filleul.
+            void trackFunnel("referral_completed");
+            effacerCookieRef();
+          }
         })
         .catch(() => {
           /* anti-abus best-effort : un échec réseau ne doit rien casser */

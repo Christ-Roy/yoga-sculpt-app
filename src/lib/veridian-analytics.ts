@@ -142,4 +142,14 @@ export const FUNNEL = {
   PURCHASE: "purchase",
   /** Réservation d'un créneau confirmée. */
   RESERVATION_CONFIRMED: "reservation_confirmed",
+
+  // ── Branche PARRAINAGE (chemin parallèle au tunnel principal) ──────────────
+  /** Parrain : a partagé/copié son lien de parrainage. */
+  REFERRAL_SHARED: "referral_shared",
+  /** Parrain : a envoyé une invitation par e-mail. */
+  REFERRAL_INVITED: "referral_invited",
+  /** Filleul : arrivée sur la landing /invitation (porte d'entrée alternative). */
+  REFERRAL_LANDING: "referral_landing",
+  /** Filleul : entrée de parrainage complétée (venu d'un lien, code consommé). */
+  REFERRAL_COMPLETED: "referral_completed",
 } as const;

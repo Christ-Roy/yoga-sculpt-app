@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { AuthBackground } from "@/components/AuthBackground";
 import { AuthMethods } from "@/components/AuthMethods";
+import FunnelGoal from "@/components/FunnelGoal";
 import { createServiceClient } from "@/lib/supabase/service";
 import { parrainPublicParCode, type ParrainPublic } from "@/lib/referral";
 import { logEvent } from "@/lib/events";
@@ -79,6 +80,9 @@ export default async function InvitationPage({
 
   return (
     <main className="relative flex min-h-dvh items-center justify-center px-5 py-12">
+      {/* Branche PARRAINAGE du tunnel : arrivée d'un filleul (porte d'entrée
+          alternative au CTA vitrine). Goal côté tracker pour l'entonnoir analytics. */}
+      <FunnelGoal action="referral_landing" />
       <AuthBackground />
       <div className="relative z-10 w-full max-w-md animate-fade-in-up">
         {/* Médaillon YS (cohérent /login + onboarding) */}
