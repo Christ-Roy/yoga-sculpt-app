@@ -41,8 +41,28 @@ git checkout main && git merge staging && git push origin main
 | `production` | `yoga-sculpt-app` | prod `esearpxflfgreejjxlfg` | `*/15 * * * *` actif | `https://app.yoga-sculpt.fr` |
 | `staging` | `yoga-sculpt-app-staging` | staging `htgbtckgkulwuyzfsvjq` | **aucun** | `…workers.dev` (à caler) |
 
-Déploiement : `wrangler deploy --env staging` / `wrangler deploy --env production`.
-Scripts npm : `npm run deploy:staging`, `npm run deploy:prod`.
+### 🔴 RÈGLE PROD : ne JAMAIS déployer la prod à la main en local
+
+Le **seul** déploiement prod autorisé = le workflow GitHub Actions :
+```bash
+gh workflow run "Deploy production" --ref main
+```
+**`wrangler deploy --env production` lancé en LOCAL est INTERDIT** (et bloqué :
+`guard-prod-deploy-ci-only.sh` + une règle `deny` dans `.claude/settings.json`).
+
+**Pourquoi** : les `NEXT_PUBLIC_*` sont inlinées **au build** dans le bundle client.
+Un `npm run build` local lit `.env.local` = **STAGING** → la prod servirait un bundle
+qui parle à la base staging → **`"provider is not enabled"` au login Google → personne
+ne s'inscrit = argent perdu** (incident vécu 2026-06-23, déjà 2 fois). Le workflow GitHub
+build avec les secrets `PROD_*` → bundle sain.
+
+Déploiement **staging** (OK en local) : `npm run deploy:staging`.
+Déploiement **prod** : `gh workflow run "Deploy production" --ref main` UNIQUEMENT.
+(`npm run deploy:prod` existe mais refuse de tourner hors CI sauf `ALLOW_LOCAL_PROD_DEPLOY=1`.)
+
+**Vérif post-deploy prod** (toujours) : `curl -s app.yoga-sculpt.fr/login` → suivre les
+chunks JS → doivent contenir `esearpxflfgreejjxlfg` (prod), JAMAIS `htgbtckgkulwuyzfsvjq`
+(staging).
 
 > ⚠️ **`NEXT_PUBLIC_APP_URL` staging** : l'URL workers.dev par défaut est
 > `https://yoga-sculpt-app-staging.<sous-domaine-de-compte>.workers.dev`. Le

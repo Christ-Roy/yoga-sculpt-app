@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(wrangler deploy --env production*)",
+      "Bash(npx wrangler deploy --env production*)",
+      "Bash(npx wrangler@* deploy --env production*)"
+    ]
+  }
+}
