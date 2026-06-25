@@ -1,13 +1,30 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   isDisposableEmail,
   getClientIp,
   getClientIpFromHeaders,
   canCreditReferral,
   canGrantWelcomeTicket,
+  __resetDisposableBlocklistForTests,
 } from "@/lib/anti-abuse";
 import { makeSupabaseMock, type MockSupabase } from "../helpers/supabase-mock";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * Les chemins de crédit (`canCreditReferral`/`canGrantWelcomeTicket`) appellent
+ * `refreshDisposableBlocklist()` qui ferait sinon un VRAI fetch GitHub → CI
+ * flaky + lent. On stub `global.fetch` pour qu'il échoue silencieusement : le
+ * fallback Set statique s'applique (jamais fail-open), ce que ces tests vérifient.
+ * Le cache mémoire est remis à zéro entre les cas.
+ */
+beforeEach(() => {
+  __resetDisposableBlocklistForTests();
+  global.fetch = vi.fn().mockRejectedValue(new Error("no network in unit tests"));
+});
+afterEach(() => {
+  __resetDisposableBlocklistForTests();
+  vi.restoreAllMocks();
+});
 
 /**
  * Tests de lib/anti-abuse — logique anti auto-parrainage (V2b).

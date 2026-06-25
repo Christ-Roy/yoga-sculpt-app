@@ -27,7 +27,7 @@ const log = createLogger("anti-abuse");
  * pour filtrer le gros des inscriptions opportunistes sans dépendre d'un
  * service externe. Stockée en Set pour un lookup O(1). À enrichir si besoin.
  */
-const DISPOSABLE_EMAIL_DOMAINS = new Set<string>([
+const DISPOSABLE_EMAIL_DOMAINS_STATIC = new Set<string>([
   "mailinator.com",
   "10minutemail.com",
   "10minutemail.net",
@@ -83,6 +83,209 @@ const DISPOSABLE_EMAIL_DOMAINS = new Set<string>([
 ]);
 
 /**
+ * Fournisseurs dont les ALIAS pointent tous vers la MÊME boîte. Pour ces
+ * domaines, on canonicalise la partie locale avant tout test d'identité /
+ * jetabilité :
+ *   - on retire le `+tag` (tout ce qui suit le premier `+`) ;
+ *   - pour Gmail on retire AUSSI les `.` (Gmail les ignore : `u.s.e.r` == `user`).
+ * Conséquence : `u.s.e.r+promo@gmail.com`, `user@gmail.com`,
+ * `US.ER+x@googlemail.com` se réduisent TOUS à `user@gmail.com` → un même
+ * attaquant ne peut plus fabriquer N identités gratuites avec une seule boîte.
+ *
+ * `dotsIgnored` distingue Gmail (points ignorés) des autres (`+tag` seulement).
+ */
+const ALIAS_PROVIDERS: Record<string, { canonicalDomain: string; dotsIgnored: boolean }> = {
+  "gmail.com": { canonicalDomain: "gmail.com", dotsIgnored: true },
+  "googlemail.com": { canonicalDomain: "gmail.com", dotsIgnored: true },
+};
+
+/**
+ * Source de blocklist dynamique (liste publique maintenue de domaines jetables).
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ POURQUOI une liste distante ?                                            │
+ * │   La Set statique (~55 domaines) ignore les MILLIERS de domaines jetables│
+ * │   réels et n'est jamais à jour. On unionne donc une liste publique tenue │
+ * │   à jour par la communauté (un domaine par ligne, format texte brut).    │
+ * │                                                                          │
+ * │ RUNTIME — Cloudflare Workers (edge) :                                    │
+ * │   `fetch` + `AbortSignal.timeout` + `Set` uniquement (Web standard, zéro │
+ * │   built-in Node, pas de `fs`, pas de dépendance). Cache mémoire au niveau │
+ * │   du module (l'isolate Worker est réutilisé entre requêtes → 1 fetch /   │
+ * │   TTL, pas 1 par requête).                                                │
+ * │                                                                          │
+ * │ ⚠️ JAMAIS FAIL-OPEN :                                                     │
+ * │   le test effectif = Set STATIQUE ∪ liste distante. Si le fetch échoue / │
+ * │   time out / renvoie du vide, on RETOMBE sur la Set statique (le plancher │
+ * │   conservateur reste appliqué). Un échec réseau ne peut donc QUE nous     │
+ * │   rendre moins large que la liste distante — jamais plus permissif que le │
+ * │   comportement statique d'origine. On ne « laisse jamais passer » par     │
+ * │   panne : on bloque au minimum ce que la Set statique bloque déjà.        │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ */
+const DISPOSABLE_BLOCKLIST_URL =
+  "https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/main/disposable_email_blocklist.conf";
+
+/** TTL du cache distant (ms). Au-delà, le prochain crédit re-fetch en best-effort. */
+const BLOCKLIST_TTL_MS = 6 * 60 * 60 * 1000; // 6 h
+/** Timeout du fetch distant (ms) — on ne bloque jamais un crédit sur le réseau. */
+const BLOCKLIST_FETCH_TIMEOUT_MS = 2500;
+/** Garde-fou anti-réponse aberrante : on ignore une liste démesurée (corruption/MITM). */
+const BLOCKLIST_MAX_ENTRIES = 200_000;
+
+/**
+ * Cache mémoire (niveau module = niveau isolate Worker). `domains` = dernière
+ * liste distante valide connue ; `fetchedAt` = horodatage ; `inflight` = promesse
+ * de fetch en cours (dédoublonne les requêtes concurrentes du même isolate).
+ */
+const dynamicBlocklist: {
+  domains: Set<string>;
+  fetchedAt: number;
+  inflight: Promise<void> | null;
+} = { domains: new Set(), fetchedAt: 0, inflight: null };
+
+/**
+ * Rafraîchit (best-effort, silencieux) le cache de la blocklist distante si le
+ * TTL est expiré. Ne JAMAIS throw : toute erreur (réseau, timeout, parse, taille
+ * aberrante) laisse le dernier cache en place et retombe in fine sur la Set
+ * statique. À appeler (await) en tête des chemins de crédit (async), pas dans le
+ * test synchrone `isDisposableEmail` qui doit rester pur.
+ */
+export async function refreshDisposableBlocklist(): Promise<void> {
+  const now = Date.now();
+  // Cache encore frais (et déjà peuplé) → rien à faire.
+  if (now - dynamicBlocklist.fetchedAt < BLOCKLIST_TTL_MS && dynamicBlocklist.domains.size > 0) {
+    return;
+  }
+  // Un fetch est déjà en cours dans cet isolate → on s'y raccroche (pas de N fetchs).
+  if (dynamicBlocklist.inflight) {
+    return dynamicBlocklist.inflight;
+  }
+
+  dynamicBlocklist.inflight = (async () => {
+    try {
+      const res = await fetch(DISPOSABLE_BLOCKLIST_URL, {
+        // AbortSignal.timeout : Web standard, supporté sur Workers edge.
+        signal: AbortSignal.timeout(BLOCKLIST_FETCH_TIMEOUT_MS),
+        headers: { accept: "text/plain" },
+        cf: { cacheTtl: 21_600, cacheEverything: true },
+      } as RequestInit);
+
+      if (!res.ok) {
+        log.warn("Blocklist jetable : HTTP non-OK, on garde le cache/statique", {
+          status: res.status,
+        });
+        return;
+      }
+
+      const text = await res.text();
+      const parsed = parseBlocklist(text);
+      if (parsed.size === 0) {
+        log.warn("Blocklist jetable : réponse vide/illisible, on garde le cache/statique");
+        return;
+      }
+      if (parsed.size > BLOCKLIST_MAX_ENTRIES) {
+        // Réponse aberrante (corruption, mauvais endpoint, MITM) → on ignore.
+        log.warn("Blocklist jetable : taille aberrante, ignorée", { size: parsed.size });
+        return;
+      }
+
+      dynamicBlocklist.domains = parsed;
+      dynamicBlocklist.fetchedAt = Date.now();
+      log.info("Blocklist jetable rafraîchie", { size: parsed.size });
+    } catch (e) {
+      // Réseau / timeout / parse : on NE crédite jamais sur une panne → on
+      // retombe simplement sur la Set statique (jamais fail-open). Best-effort.
+      log.warn("Blocklist jetable : fetch échoué, fallback Set statique", {
+        err: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      dynamicBlocklist.inflight = null;
+    }
+  })();
+
+  return dynamicBlocklist.inflight;
+}
+
+/**
+ * TEST-ONLY — réinitialise le cache mémoire de la blocklist distante. Le cache
+ * vit au niveau du module (volontaire : 1 fetch / TTL côté Worker) ; les tests
+ * doivent pouvoir repartir d'un état propre entre les cas. À n'utiliser QUE
+ * depuis les tests (pas de chemin de prod ne l'appelle).
+ */
+export function __resetDisposableBlocklistForTests(): void {
+  dynamicBlocklist.domains = new Set();
+  dynamicBlocklist.fetchedAt = 0;
+  dynamicBlocklist.inflight = null;
+}
+
+/**
+ * Parse une blocklist au format « un domaine par ligne » (conf communautaire) :
+ * ignore lignes vides + commentaires (`#`), trim, lowercase. Robuste aux CR/LF.
+ */
+function parseBlocklist(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim().toLowerCase();
+    if (!line || line.startsWith("#")) continue;
+    // Une entrée valide ressemble à un domaine (pas d'espace, au moins un point).
+    if (line.includes(" ") || !line.includes(".")) continue;
+    out.add(line);
+  }
+  return out;
+}
+
+/**
+ * Canonicalise un e-mail pour la COMPARAISON D'IDENTITÉ et le test de jetabilité.
+ *
+ * Au-delà du simple `trim + lowercase`, réduit les ALIAS d'un même fournisseur à
+ * une forme unique (cf. `ALIAS_PROVIDERS`) :
+ *   - retire le `+tag` de la partie locale ;
+ *   - retire les `.` de la partie locale pour Gmail/Googlemail (ignorés par Gmail).
+ * `Googlemail.com` est rabattu sur `gmail.com`.
+ *
+ * Exemples :
+ *   `U.s.e.r+promo@GMail.com`  → `user@gmail.com`
+ *   `user@googlemail.com`      → `user@gmail.com`
+ *   `Jean.Dupont@gmail.com`    → `jeandupont@gmail.com`
+ *   `client+ys@outlook.com`    → `client@outlook.com` (tag retiré, points gardés)
+ *
+ * Un e-mail malformé (sans `@`) est renvoyé `trim+lowercase` tel quel (le format
+ * est validé en amont par zod ; on ne casse rien ici).
+ *
+ * ⚠️ NE PAS confondre avec `normaliserEmail` de `lib/referral.ts`, volontairement
+ * plus LÉGÈRE (juste trim+lowercase) car elle sert de CLÉ DE STOCKAGE pour
+ * `referrals.filleul_email` (on veut y garder l'adresse réelle saisie). Celle-ci
+ * est la forme CANONIQUE pour détecter qu'un attaquant réutilise la même boîte.
+ */
+export function normaliserEmail(email: string): string {
+  const lower = email.trim().toLowerCase();
+  const at = lower.lastIndexOf("@");
+  if (at <= 0) return lower; // pas de @, ou @ en tête → on ne touche pas.
+
+  let local = lower.slice(0, at);
+  const domain = lower.slice(at + 1);
+
+  const alias = ALIAS_PROVIDERS[domain];
+
+  // `+tag` : tout fournisseur respectant la convention sub-addressing l'utilise.
+  // On le retire systématiquement (gmail, outlook, proton, fastmail…). Sans risque
+  // côté faux positif : `+` n'est jamais significatif dans une vraie identité.
+  const plus = local.indexOf("+");
+  if (plus >= 0) local = local.slice(0, plus);
+
+  if (alias) {
+    if (alias.dotsIgnored) local = local.split(".").join("");
+    const canonicalLocal = local.length > 0 ? local : lower.slice(0, at); // garde-fou : ne vide jamais le local
+    return `${canonicalLocal}@${alias.canonicalDomain}`;
+  }
+
+  // Domaine non-alias : on a retiré le `+tag`, on garde le reste tel quel.
+  const safeLocal = local.length > 0 ? local : lower.slice(0, at);
+  return `${safeLocal}@${domain}`;
+}
+
+/**
  * Extrait l'IP cliente réelle derrière le proxy Cloudflare.
  *   1. `CF-Connecting-IP` : header POSÉ PAR CLOUDFLARE, non spoofable par le
  *      client (Cloudflare l'écrase systématiquement). C'est la source fiable
@@ -116,17 +319,27 @@ export function getClientIpFromHeaders(
 }
 
 /**
- * Vrai si le domaine de l'e-mail est dans la liste des fournisseurs jetables.
- * Robuste aux espaces / casse. Un e-mail malformé est considéré jetable=false
- * (la validation de format est faite en amont par zod) — on ne se prononce que
- * sur le domaine.
+ * Vrai si le domaine de l'e-mail est dans la blocklist des fournisseurs jetables.
+ *
+ * Le domaine testé est celui de la forme CANONIQUE (`normaliserEmail`) : on rabat
+ * `googlemail.com`→`gmail.com` et on neutralise les alias avant le test.
+ *
+ * La blocklist effective = Set STATIQUE ∪ cache distant (`dynamicBlocklist`). Le
+ * cache distant n'est peuplé qu'après un `refreshDisposableBlocklist()` réussi
+ * (appelé en tête des chemins de crédit) ; tant qu'il est vide, seul le plancher
+ * statique s'applique → JAMAIS fail-open, jamais plus permissif qu'avant.
+ *
+ * Reste SYNCHRONE (appelée telle quelle par `inviter/route.ts` et les chemins de
+ * crédit) : pas d'I/O ici, on lit juste deux Set en mémoire. Robuste casse/espaces.
+ * Un e-mail malformé (sans `@`) → jetable=false (le format est validé par zod).
  */
 export function isDisposableEmail(email: string): boolean {
-  const at = email.lastIndexOf("@");
+  const canonical = normaliserEmail(email);
+  const at = canonical.lastIndexOf("@");
   if (at < 0) return false;
-  const domain = email.slice(at + 1).trim().toLowerCase();
+  const domain = canonical.slice(at + 1);
   if (!domain) return false;
-  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+  return DISPOSABLE_EMAIL_DOMAINS_STATIC.has(domain) || dynamicBlocklist.domains.has(domain);
 }
 
 /** Paramètres de la décision de crédit. */
@@ -166,6 +379,9 @@ export async function canCreditReferral(
   { filleulUserId, filleulEmail, ip, fingerprint }: CanCreditParams,
 ): Promise<boolean> {
   // ── R1 : e-mail jetable ──────────────────────────────────────────────────
+  // Best-effort : rafraîchit la blocklist distante (TTL/in-flight gérés, ne throw
+  // jamais). En cas d'échec on retombe sur la Set statique (jamais fail-open).
+  await refreshDisposableBlocklist();
   if (isDisposableEmail(filleulEmail)) {
     return false;
   }
@@ -322,6 +538,8 @@ export async function canGrantWelcomeTicket(
   { userId, email, ip, fingerprint }: CanGrantWelcomeParams,
 ): Promise<boolean> {
   // ── W1 : e-mail jetable ────────────────────────────────────────────────────
+  // Best-effort : rafraîchit la blocklist distante (fallback Set statique si KO).
+  await refreshDisposableBlocklist();
   if (isDisposableEmail(email)) {
     return false;
   }

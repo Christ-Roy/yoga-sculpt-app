@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { DEV_AUTH_BYPASS } from "@/lib/dev-auth";
 import { createServiceClient } from "@/lib/supabase/service";
+import { authCookieDomainOptions } from "@/lib/supabase/cookie-domain";
 
 /**
  * Supabase client for the server (Server Components, Route Handlers,
@@ -32,6 +33,11 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // ⚠️ PROD : scope le cookie de session sur le domaine parent
+      // (`Domain=.yoga-sculpt.fr`) → partagé apex (vitrine) + `app.` (espace
+      // client), sans `SameSite=None`. En dev/local : objet vide → host-only
+      // (sinon le cookie casse en `localhost`). Cf src/lib/supabase/cookie-domain.
+      ...authCookieDomainOptions(),
       cookies: {
         getAll() {
           return cookieStore.getAll();

@@ -3,6 +3,7 @@ import {
   escapeHtml,
   renderEmail,
   textFromBlocks,
+  renderBlocParrain,
   COULEURS,
 } from "@/lib/email-templates";
 
@@ -154,5 +155,111 @@ describe("textFromBlocks", () => {
 
   it("une seule ligne reste telle quelle", () => {
     expect(textFromBlocks(["x"])).toBe("x");
+  });
+});
+
+/**
+ * Régression du fix `faca9a3` (vague 1) — bloc « profil parrain » dans l'email
+ * d'invitation Brevo (avatar + prénom + e-mail).
+ *
+ * Enjeux couverts :
+ *   - BEST-EFFORT : prénom absent/vide → bloc OMIS (`""`), jamais d'email cassé ;
+ *   - SÉCURITÉ (anti-XSS) : prénom ET e-mail sont du contenu DYNAMIQUE injecté
+ *     dans du HTML → DOIVENT être échappés (escapeHtml) ;
+ *   - AVATAR : URL http(s) acceptée telle quelle ; toute autre forme
+ *     (`data:`, `javascript:`, chemin relatif…) REJETÉE → fallback initiale
+ *     (le bloc ne doit JAMAIS poser une URL d'image dangereuse) ;
+ *   - FALLBACK initiale : pas d'avatar → médaillon initiale (1re lettre, MAJ) ;
+ *   - e-mail optionnel (présent/absent selon params).
+ */
+describe("renderBlocParrain — bloc profil parrain (email invitation)", () => {
+  it("BEST-EFFORT : prénom null/vide/espaces → bloc omis (chaîne vide)", () => {
+    expect(renderBlocParrain({ prenom: null, email: "x@y.fr" })).toBe("");
+    expect(renderBlocParrain({ prenom: "", email: "x@y.fr" })).toBe("");
+    expect(renderBlocParrain({ prenom: "   ", email: "x@y.fr" })).toBe("");
+  });
+
+  it("rend le prénom et l'e-mail quand le parrain est résolu", () => {
+    const html = renderBlocParrain({ prenom: "Alice", email: "alice@gmail.com" });
+    expect(html).not.toBe("");
+    expect(html).toContain("Alice");
+    expect(html).toContain("vous invite");
+    expect(html).toContain("alice@gmail.com");
+    // Table-based (clients email) — pas de flex/grid.
+    expect(html).toContain("<table");
+    expect(html).not.toMatch(/display\s*:\s*(flex|grid)/);
+  });
+
+  it("SÉCURITÉ : échappe le PRÉNOM (pas de balise script brute)", () => {
+    const html = renderBlocParrain({
+      prenom: `<script>alert(1)</script>`,
+      email: "x@y.fr",
+    });
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("SÉCURITÉ : échappe l'E-MAIL (un e-mail piégé ne casse pas le HTML)", () => {
+    const html = renderBlocParrain({
+      prenom: "Bob",
+      email: `a"<b>@y.fr`,
+    });
+    expect(html).not.toContain(`a"<b>@y.fr`);
+    expect(html).toContain("&lt;b&gt;");
+    expect(html).toContain("&quot;");
+  });
+
+  it("AVATAR http(s) : URL injectée dans un <img src=...>", () => {
+    const url = "https://lh3.googleusercontent.com/a/avatar=s96-c";
+    const html = renderBlocParrain({ prenom: "Alice", email: null, avatarUrl: url });
+    expect(html).toContain("<img");
+    expect(html).toContain(`src="${url}"`);
+    expect(html).toContain('referrerpolicy="no-referrer"');
+  });
+
+  it("SÉCURITÉ : avatar non-http(s) (data:/javascript:/relatif) REJETÉ → fallback initiale", () => {
+    for (const mauvais of [
+      "data:image/png;base64,AAAA",
+      "javascript:alert(1)",
+      "//evil.com/x.png",
+      "/relatif.png",
+      "ftp://x/y.png",
+    ]) {
+      const html = renderBlocParrain({
+        prenom: "Alice",
+        email: null,
+        avatarUrl: mauvais,
+      });
+      // L'URL dangereuse n'est JAMAIS posée comme src d'image.
+      expect(html).not.toContain(`src="${mauvais}"`);
+      expect(html).not.toContain("<img");
+      // Fallback : médaillon initiale (1re lettre, majuscule).
+      expect(html).toContain("A");
+    }
+  });
+
+  it("FALLBACK initiale : sans avatar → 1re lettre en MAJUSCULE, pas d'<img>", () => {
+    const html = renderBlocParrain({ prenom: "alice", email: null });
+    expect(html).not.toContain("<img");
+    // Initiale majuscule du prénom minuscule.
+    expect(html).toContain(">A</td>");
+  });
+
+  it("e-mail optionnel : absent → pas de ligne e-mail, mais le bloc reste rendu", () => {
+    const sans = renderBlocParrain({ prenom: "Alice", email: null });
+    expect(sans).not.toBe("");
+    expect(sans).toContain("Alice");
+    // Couleur muted = ligne e-mail ; absente quand pas d'email.
+    expect(sans).not.toContain(COULEURS.muted);
+
+    const avec = renderBlocParrain({ prenom: "Alice", email: "alice@gmail.com" });
+    expect(avec).toContain(COULEURS.muted);
+  });
+
+  it("trim le prénom avant rendu (espaces parasites ignorés)", () => {
+    const html = renderBlocParrain({ prenom: "  Léa  ", email: null });
+    expect(html).toContain(">L</td>"); // initiale du prénom trimé
+    expect(html).toContain("Léa");
+    expect(html).not.toContain("  Léa  ");
   });
 });

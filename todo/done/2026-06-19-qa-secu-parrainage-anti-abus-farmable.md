@@ -1,6 +1,29 @@
 # [P2] QA sécu — Parrainage : durcir l'anti-abus (reliquat après le cap)
 
-**Statut** : levier #1 LIVRÉ (crédit déféré à la séance honorée) · **Qui** : agent · **Source** : QA sécu 2026-06-19 (axe #4 anti-abus)
+**Statut** : ✅ CLOS — leviers #1 ET #2 LIVRÉS (staging `ddf1f60`). · **Qui** : agent · **Source** : QA sécu 2026-06-19 (axe #4 anti-abus)
+
+## ✅ LIVRÉ 2026-06-19 — reliquat #2 : normalisation alias Gmail + blocklist jetable dynamique (staging `ddf1f60`)
+`src/lib/anti-abuse.ts` :
+- **`normaliserEmail(email)`** (canonicalisation, exportée) : retire le `+tag` (tout
+  fournisseur sub-addressing) ; retire les `.` de la partie locale pour gmail/googlemail ;
+  rabat `googlemail.com → gmail.com`. → `u.s.e.r+x@gmail.com`, `user@gmail.com`,
+  `US.ER@googlemail.com` collapsent en UNE identité. `isDisposableEmail` teste le DOMAINE
+  canonique. Distincte de `referral.normaliserEmail` (légère, = clé de stockage `filleul_email`).
+- **Blocklist dynamique edge-safe** : `isDisposableEmail` = Set statique ∪ liste publique
+  maintenue (`disposable-email-domains`, raw GitHub). `refreshDisposableBlocklist()` :
+  fetch + `AbortSignal.timeout` + `Set` (Web standard, zéro built-in Node, zéro dép → runtime
+  Workers edge OK), cache mémoire isolate (TTL 6h, timeout 2.5s, dédoublonnage in-flight,
+  garde-fou taille). Appelé best-effort en tête de `canCreditReferral`/`canGrantWelcomeTicket`.
+  **JAMAIS FAIL-OPEN** : fetch KO/timeout/vide → fallback Set statique (plancher conservateur).
+  `isDisposableEmail` reste SYNCHRONE → `inviter/route.ts` inchangé.
+- Tests : `__tests__/lib/anti-abuse-email-normalisation.test.ts` (15) — alias Gmail → 1 identité,
+  fetch OK → domaine distant bloqué, fail-safe (jette/HTTP-KO/vide → statique), dédoublonnage,
+  TTL, R1 via liste distante + R1 fail-safe. Stub fetch ajouté aux tests existants
+  (`anti-abuse.test.ts`, `welcome-ticket.test.ts`) pour éviter un vrai appel réseau en CI.
+
+> **Point #3 (fingerprint) : pas de code — conforme au ticket.** Le fingerprint reste un filtre
+> best-effort (R3/W3), déjà documenté comme tel ; le vrai garde-fou est le levier #1 (séance
+> honorée). Rien à durcir côté code, c'était une note de posture. Le ticket est donc CLOS.
 
 ## ✅ LIVRÉ 2026-06-19 — levier #1 : crédit APRÈS la 1re séance HONORÉE (tue le farming)
 Le crédit du parrain n'est PLUS déclenché à l'inscription du filleul. Désormais :

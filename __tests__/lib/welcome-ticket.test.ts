@@ -41,6 +41,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   serviceMock = makeSupabaseMock();
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // canGrantWelcomeTicket appelle désormais refreshDisposableBlocklist() (fetch
+  // GitHub). On le stub en échec → fallback Set statique (jamais fail-open),
+  // pas de réseau réel en CI. Le verdict jetable s'appuie sur le plancher statique.
+  global.fetch = vi.fn().mockRejectedValue(new Error("no network in unit tests"));
 });
 
 afterEach(() => {
