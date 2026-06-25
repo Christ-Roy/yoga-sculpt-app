@@ -70,13 +70,15 @@ function makeReq(body: unknown): Request {
 }
 
 /**
- * Programme la séquence Supabase d'une LIAISON pending (nouveau flux). Ordre :
+ * Programme la séquence Supabase d'une LIAISON + CRÉDIT À L'INSCRIPTION
+ * (flux depuis 2026-06-25 : aligné sur la promesse de l'UI). Ordre :
  *   1. enregistrerSignaux  → account_signals::select (existant) puis ::upsert
  *   2. completerReferral :
  *      a. profiles::select  → résolution du parrain via le code
- *      b. lierFilleulSansCrediter → referrals::select (pending existant ?)
- *      c. referrals::insert → création du referral pending à la volée
- *   (PLUS de R4, plafond, ticket, marquage : tout cela est déféré à la séance.)
+ *      b. lierFilleulSansCrediter → referrals::select (pending ?) puis ::insert
+ *         (retourne l'id du referral créé)
+ *      c. crediterReferralPending (anti-abus mocké OK) :
+ *         - referrals::select (count plafond) → tickets::insert → referrals::update
  */
 function queueLegitLink() {
   serviceMock.queueResult("account_signals", "select", { data: null, error: null });
@@ -85,9 +87,13 @@ function queueLegitLink() {
     data: { id: PARRAIN_ID },
     error: null,
   });
-  // lierFilleulSansCrediter : pas de pending existant → insert.
+  // lierFilleulSansCrediter : pas de pending existant → insert (retourne l'id).
   serviceMock.queueResult("referrals", "select", { data: null, error: null });
-  serviceMock.queueResult("referrals", "insert", { data: null, error: null });
+  serviceMock.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
+  // crediterReferralPending : plafond OK → ticket → marquage completed.
+  serviceMock.queueResult("referrals", "select", { data: null, error: null, count: 0 });
+  serviceMock.queueResult("tickets", "insert", { data: null, error: null });
+  serviceMock.queueResult("referrals", "update", { data: { id: "ref-new" }, error: null });
 }
 
 beforeEach(() => {
@@ -147,7 +153,7 @@ describe("POST /api/parrainage/completer", () => {
     ).toBeDefined();
   });
 
-  it("200 + LIAISON pending sur code valide — AUCUN ticket crédité à l'inscription", async () => {
+  it("200 + LIAISON pending + CRÉDIT du parrain à l'inscription (anti-abus OK)", async () => {
     queueLegitLink();
 
     const { POST } = await import("@/app/api/parrainage/completer/route");
@@ -167,13 +173,13 @@ describe("POST /api/parrainage/completer", () => {
       status: "pending",
     });
 
-    // ANTI-FARMING : AUCUN ticket crédité à l'inscription (le crédit est déféré).
+    // NOUVEAU : un ticket est crédité au parrain DÈS l'inscription (aligné UI).
     expect(
       serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
-    ).toBeUndefined();
+    ).toBeDefined();
   });
 
-  it("200 + LIAISON via update si un referral pending (invitation e-mail) existe déjà", async () => {
+  it("200 + LIAISON via update (invitation e-mail) + crédit du parrain", async () => {
     serviceMock.queueResult("account_signals", "select", { data: null, error: null });
     serviceMock.queueResult("account_signals", "upsert", { data: null, error: null });
     serviceMock.queueResult("profiles", "select", {
@@ -186,6 +192,10 @@ describe("POST /api/parrainage/completer", () => {
       error: null,
     });
     serviceMock.queueResult("referrals", "update", { data: null, error: null });
+    // crediterReferralPending : plafond OK → ticket → marquage completed.
+    serviceMock.queueResult("referrals", "select", { data: null, error: null, count: 0 });
+    serviceMock.queueResult("tickets", "insert", { data: null, error: null });
+    serviceMock.queueResult("referrals", "update", { data: { id: "ref-invite" }, error: null });
 
     const { POST } = await import("@/app/api/parrainage/completer/route");
     const res = asMockResponse(await POST(makeReq({ code: CODE })));
@@ -195,9 +205,10 @@ describe("POST /api/parrainage/completer", () => {
       (c) => c.table === "referrals" && c.op === "update",
     );
     expect(upd?.payload).toMatchObject({ filleul_user_id: FILLEUL.id });
+    // Crédit à l'inscription : ticket bien inséré.
     expect(
       serviceMock.calls.find((c) => c.table === "tickets" && c.op === "insert"),
-    ).toBeUndefined();
+    ).toBeDefined();
   });
 
   it("200 SILENCIEUX sur code inconnu — aucune liaison, aucun motif révélé", async () => {

@@ -352,7 +352,7 @@ describe("parrainPublicParCode — landing enrichie (prénom + avatar + email)",
   });
 });
 
-describe("completerReferral — LIAISON pending (anti-farming : crédit déféré)", () => {
+describe("completerReferral — CRÉDIT À L'INSCRIPTION (aligné UI, anti-abus conservé)", () => {
   const base = {
     code: CODE,
     filleulUserId: FILLEUL,
@@ -361,52 +361,80 @@ describe("completerReferral — LIAISON pending (anti-farming : crédit défér�
     fingerprint: null,
   };
 
-  it("ne crédite JAMAIS à l'inscription, même anti-abus OK (credited:false)", async () => {
-    // parrain résolu, pas de pending → lierFilleulSansCrediter insère un referral.
+  it("crédite le parrain DÈS l'inscription quand l'anti-abus est OK (credited:true, 1 ticket)", async () => {
+    // parrain résolu, pas de pending → insert d'un referral (retourne son id),
+    // puis crediterReferralPending : plafond OK → ticket → marquage completed.
+    service.queueResult("profiles", "select", { data: { id: PARRAIN }, error: null });
+    service.queueResult("referrals", "select", { data: null, error: null }); // pas de pending
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null }); // id du lien
+    service.queueResult("referrals", "select", { data: null, error: null, count: 0 }); // plafond OK
+    service.queueResult("tickets", "insert", { data: null, error: null }); // crédit ticket
+    service.queueResult("referrals", "update", { data: { id: "ref-new" }, error: null }); // marquage
+
+    const { completerReferral } = await import("@/lib/referral");
+    expect(await completerReferral(service.client as never, base)).toEqual({
+      credited: true,
+      linked: true,
+    });
+    // Un ticket de parrainage est bien crédité au PARRAIN à l'inscription.
+    const ticket = service.calls.find(
+      (c) => c.table === "tickets" && c.op === "insert",
+    );
+    expect(ticket?.payload).toMatchObject({
+      user_id: PARRAIN,
+      type: "collectif",
+      source: "referral",
+    });
+    // Le referral est marqué completed/credité.
+    const upd = service.calls.find(
+      (c) => c.table === "referrals" && c.op === "update",
+    );
+    expect(upd?.payload).toMatchObject({
+      status: "completed",
+      ticket_credite: true,
+    });
+  });
+
+  it("anti-abus refuse à l'inscription → lié mais NON crédité (silencieux)", async () => {
+    canCreditMock.mockResolvedValue(false);
     service.queueResult("profiles", "select", { data: { id: PARRAIN }, error: null });
     service.queueResult("referrals", "select", { data: null, error: null });
-    service.queueResult("referrals", "insert", { data: null, error: null });
+    service.queueResult("referrals", "insert", { data: { id: "ref-new" }, error: null });
 
     const { completerReferral } = await import("@/lib/referral");
     expect(await completerReferral(service.client as never, base)).toEqual({
       credited: false,
       linked: true,
     });
-    // ANTI-FARMING : AUCUN ticket à l'inscription (le crédit est déféré à la séance).
+    // Anti-farming : aucun ticket si l'anti-abus bloque.
     expect(
       service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
     ).toBeUndefined();
-    // Le filleul est bien lié au parrain (referral pending posé).
-    const ins = service.calls.find(
-      (c) => c.table === "referrals" && c.op === "insert",
-    );
-    expect(ins?.payload).toMatchObject({
-      parrain_user_id: PARRAIN,
-      filleul_user_id: FILLEUL,
-      status: "pending",
-    });
   });
 
-  it("rattache un pending existant (invitation e-mail) via update, sans ticket", async () => {
+  it("rattache un pending existant (invitation e-mail) via update, puis crédite", async () => {
     service.queueResult("profiles", "select", { data: { id: PARRAIN }, error: null });
     service.queueResult("referrals", "select", {
       data: { id: "ref-invite" },
       error: null,
     });
-    service.queueResult("referrals", "update", { data: null, error: null });
+    service.queueResult("referrals", "update", { data: null, error: null }); // lien filleul
+    service.queueResult("referrals", "select", { data: null, error: null, count: 0 }); // plafond OK
+    service.queueResult("tickets", "insert", { data: null, error: null });
+    service.queueResult("referrals", "update", { data: { id: "ref-invite" }, error: null });
 
     const { completerReferral } = await import("@/lib/referral");
     expect(await completerReferral(service.client as never, base)).toEqual({
-      credited: false,
+      credited: true,
       linked: true,
     });
-    const upd = service.calls.find(
+    const lien = service.calls.find(
       (c) => c.table === "referrals" && c.op === "update",
     );
-    expect(upd?.payload).toMatchObject({ filleul_user_id: FILLEUL });
+    expect(lien?.payload).toMatchObject({ filleul_user_id: FILLEUL });
     expect(
       service.calls.find((c) => c.table === "tickets" && c.op === "insert"),
-    ).toBeUndefined();
+    ).toBeDefined();
   });
 
   it("linked:false si la résolution du parrain échoue (fail-safe DB)", async () => {
