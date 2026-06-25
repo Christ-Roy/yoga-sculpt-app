@@ -416,8 +416,12 @@ async function crediterTicketParrain(
  * (referral pending posé) — utile au tracking interne, jamais exposé au client.
  */
 export type CompleteResult = {
-  /** TOUJOURS false à l'inscription (le crédit est déféré à la séance honorée). */
-  credited: false;
+  /**
+   * True si un ticket a été crédité au parrain à l'inscription du filleul
+   * (décision Robert 2026-06-25 : crédit à l'inscription, aligné sur l'UI).
+   * False si l'anti-abus/plafond a bloqué (refus silencieux) ou pas de lien.
+   */
+  credited: boolean;
   /** True si le filleul a été rattaché au parrain (referral pending posé). */
   linked: boolean;
 };
@@ -477,17 +481,35 @@ export async function completerReferral(
     return { credited: false, linked: false };
   }
 
-  // 3) Rattacher le filleul en pending (le crédit viendra à la séance honorée).
-  //    On NE crédite PAS, on NE fait PAS l'anti-abus ici (déféré au crédit, sur
-  //    signaux persistés) : on pose juste le lien parrain↔filleul.
-  await lierFilleulSansCrediter(service, {
+  // 3) Rattacher le filleul, puis CRÉDITER LE PARRAIN DÈS L'INSCRIPTION.
+  //    Décision Robert 2026-06-25 : on aligne le crédit sur la promesse de l'UI
+  //    (« dès qu'un ami crée son compte grâce à vous, un ticket vous est offert »),
+  //    au lieu d'attendre la 1re séance honorée. Le premier contact facile
+  //    favorise le récurrent ; l'anti-farming reste assuré par `crediterReferralPending`
+  //    (anti-abus IP/fingerprint/email jetable via canCreditReferral + plafond
+  //    maxParrainagesCredites). Refus = SILENCIEUX (referral reste pending).
+  const referralId = await lierFilleulSansCrediter(service, {
     parrainUserId,
     code,
     filleulUserId: params.filleulUserId,
     filleulEmail: params.filleulEmail,
   });
 
-  return { credited: false, linked: true };
+  if (!referralId) {
+    // Lien non résolu (course sur l'unique) → on s'arrête, pas de crédit aveugle.
+    return { credited: false, linked: true };
+  }
+
+  const credited = await crediterReferralPending(service, {
+    referralId,
+    parrainUserId,
+    filleulUserId: params.filleulUserId,
+    filleulEmail: params.filleulEmail,
+    ip: params.ip,
+    fingerprint: params.fingerprint,
+  });
+
+  return { credited, linked: true };
 }
 
 /**
@@ -599,8 +621,12 @@ async function lireSignauxFilleul(
 /**
  * Crédite UN referral pending donné (anti-abus + plafond + ticket + marquage
  * idempotent + attribution Ads + compensation de course). Cœur partagé du crédit
- * de parrainage, appelé désormais UNIQUEMENT depuis le déclencheur « séance
- * honorée » (`crediterParrainsApresSeanceHonoree`).
+ * de parrainage, appelé depuis DEUX déclencheurs :
+ *   - `completerReferral` (À L'INSCRIPTION du filleul — défaut depuis 2026-06-25,
+ *      aligné sur la promesse de l'UI) ;
+ *   - `crediterParrainsApresSeanceHonoree` (rattrapage à la 1re séance honorée,
+ *      pour les referrals qui n'auraient pas été crédités à l'inscription).
+ * L'anti-abus (canCreditReferral) + le plafond restent la seule barrière anti-farming.
  *
  * @returns `true` si un ticket a été crédité, `false` sinon (anti-abus, plafond,
  *          déjà crédité, erreur DB — toujours SÛR/silencieux).
@@ -719,7 +745,7 @@ async function lierFilleulSansCrediter(
     filleulUserId: string;
     filleulEmail: string;
   },
-): Promise<void> {
+): Promise<string | null> {
   const filleulEmail = normaliserEmail(params.filleulEmail);
   const { data: pending } = await service
     .from("referrals")
@@ -733,18 +759,25 @@ async function lierFilleulSansCrediter(
       .from("referrals")
       .update({ filleul_user_id: params.filleulUserId })
       .eq("id", pending.id);
-    return;
+    return pending.id as string;
   }
 
   // Création best-effort (peut échouer sur l'unique (parrain,email) en course :
-  // on ignore, c'est purement de la traçabilité).
-  await service.from("referrals").insert({
-    parrain_user_id: params.parrainUserId,
-    filleul_email: filleulEmail,
-    filleul_user_id: params.filleulUserId,
-    code: params.code,
-    status: "pending",
-  });
+  // on ignore, c'est purement de la traçabilité). On récupère l'id pour pouvoir
+  // créditer dans la foulée (crédit à l'inscription).
+  const { data: created } = await service
+    .from("referrals")
+    .insert({
+      parrain_user_id: params.parrainUserId,
+      filleul_email: filleulEmail,
+      filleul_user_id: params.filleulUserId,
+      code: params.code,
+      status: "pending",
+    })
+    .select("id")
+    .maybeSingle();
+
+  return (created?.id as string | undefined) ?? null;
 }
 
 /**
